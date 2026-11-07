@@ -6,6 +6,7 @@ pub mod history;
 pub mod merge;
 pub mod models;
 pub mod parser;
+pub mod paths;
 pub mod review_state;
 pub mod revision;
 pub mod rules;

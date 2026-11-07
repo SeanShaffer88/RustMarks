@@ -14,17 +14,8 @@ pub struct History {
 }
 impl Default for History {
     fn default() -> Self {
-        let base = std::env::var_os("APPDATA")
-            .or_else(|| std::env::var_os("XDG_DATA_HOME"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(std::env::temp_dir)
-                    .join(".local/share")
-            });
         Self {
-            directory: base.join("RustMarks/history"),
+            directory: crate::paths::data_dir().join("history"),
         }
     }
 }

@@ -53,9 +53,13 @@ Source A's open action honors the unsaved-changes prompt. Multiple incoming file
 
 The grid virtualizes visible rows and keeps stable cell IDs. The bulk **Move selected** action preserves bookmark identity and accepts any folder in the tree. Document undo is bounded to 50 checkpoints; rapid typing is grouped, and text fields retain their own undo while focused.
 
+## Portable mode
+
+Place an empty file named `portable.txt` next to `rustmarks.exe` and all history, dictionaries and window state go to `data/` beside it; nothing is written under `%APPDATA%`. The release portable zip includes the marker. Without it, data lives under `%APPDATA%\RustMarks` (`$XDG_DATA_HOME/RustMarks` on Linux). Existing per-user data is not migrated automatically.
+
 ## Window state
 
-Window size, position and maximized state are saved to `%APPDATA%\RustMarks\window.json` (`$XDG_DATA_HOME/RustMarks/window.json` on Linux) and restored on launch. Positions are only sanity-checked (finite, within +/-32000); there is no per-monitor check, so if a monitor is removed the OS decides where an off-screen window lands. Delete the file to reset.
+Window size, position and maximized state are saved to `window.json` in the data directory and restored on launch. Positions are only sanity-checked (finite, within +/-32000); there is no per-monitor check, so if a monitor is removed the OS decides where an off-screen window lands. Delete the file to reset.
 
 ## Formats & data safety
 
