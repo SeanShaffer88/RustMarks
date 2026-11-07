@@ -1,0 +1,35 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="RustMarks" Manufacturer="RustMarks contributors" Version="$(Version)"
+           UpgradeCode="6b0f3c1e-5d2a-4e8b-9a47-2c1d7f9e0a53" Scope="perUser" InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of RustMarks is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="RustMarks" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuDir" Name="RustMarks" />
+    </StandardDirectory>
+    <Component Id="AppExe" Directory="INSTALLFOLDER">
+      <File Source="$(ExePath)" Name="rustmarks.exe" KeyPath="yes" />
+    </Component>
+    <Component Id="AppDocs" Directory="INSTALLFOLDER">
+      <File Source="$(RepoRoot)\README.md" KeyPath="yes" />
+      <File Source="$(RepoRoot)\LICENSE" />
+      <File Source="$(RepoRoot)\CHANGELOG.md" />
+      <File Source="$(RepoRoot)\CREDITS.md" />
+    </Component>
+    <Component Id="AppShortcut" Directory="AppMenuDir">
+      <Shortcut Id="StartMenuShortcut" Name="RustMarks" Description="Offline bookmark studio"
+                Target="[INSTALLFOLDER]rustmarks.exe" WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveAppMenuDir" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\RustMarks" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Feature Id="Main" Title="RustMarks" Level="1">
+      <ComponentRef Id="AppExe" />
+      <ComponentRef Id="AppDocs" />
+      <ComponentRef Id="AppShortcut" />
+    </Feature>
+  </Package>
+</Wix>

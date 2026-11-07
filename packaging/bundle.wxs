@@ -1,0 +1,13 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle Name="RustMarks" Version="$(Version)" Manufacturer="RustMarks contributors"
+          UpgradeCode="a3e9d7c4-18b2-4f60-8d35-7e4c0b9a12f6" Scope="perUser">
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="hyperlinkLicense"
+          LicenseUrl="https://github.com/SeanShaffer88/RustMarks/blob/main/LICENSE" />
+    </BootstrapperApplication>
+    <Chain>
+      <MsiPackage SourceFile="$(MsiPath)" Id="RustMarksMsi" Vital="yes" />
+    </Chain>
+  </Bundle>
+</Wix>
