@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.1 - 2026-11-07
+
 ### Added (app icon)
 - RustMarks now has its own icon (fanned bookmark stack, red on charcoal): embedded in the executable, shown in the window/taskbar, on the Start-menu shortcut, in Add/Remove Programs, and on Setup.exe. Artwork in `assets/` (`icon.ico`, `icon.png`).
 
