@@ -116,7 +116,7 @@ impl MergeWorkspace {
                     ui.add_space(14.);ui.vertical_centered(|ui| {
                         ui.label(RichText::new("Two collections. One organized library.").size(16.).strong());
                         ui.label(RichText::new("Choose incoming files to find duplicates and compare metadata.").color(theme::MUTED));
-                        if ui.button("Choose source B…").clicked(){action=Action::ChooseFiles;}
+                        if ui.button("Choose source B…").on_hover_text("Pick one or more bookmark files to merge in. Nothing changes until you review.").clicked(){action=Action::ChooseFiles;}
                     });ui.add_space(14.);
                 });
             }
@@ -165,6 +165,9 @@ impl MergeWorkspace {
                 egui::TextEdit::singleline(&mut self.query)
                     .hint_text("Filter conflicts…")
                     .desired_width(190.),
+            )
+            .on_hover_text(
+                "Filter the conflict list by title or URL. Hidden conflicts still need a decision.",
             );
             egui::ComboBox::from_id_source("merge-bulk-choice")
                 .selected_text(decision_label(Some(self.bulk)))
@@ -176,12 +179,19 @@ impl MergeWorkspace {
                     ] {
                         ui.selectable_value(&mut self.bulk, choice, decision_label(Some(choice)));
                     }
-                });
+                })
+                .response
+                .on_hover_text(
+                    "Choice used by \"Apply to all\". Nothing is applied until you click it.",
+                );
             if ui
                 .button(format!(
                     "Apply to all {} conflicts",
                     review.preview().conflicts.len()
                 ))
+                .on_hover_text(
+                    "Set every conflict to the choice at left, replacing earlier decisions",
+                )
                 .clicked()
             {
                 review.decide_all(self.bulk);
@@ -305,7 +315,9 @@ impl MergeWorkspace {
                                                     decision_label(Some(choice)),
                                                 );
                                             }
-                                        });
+                                        })
+                                        .response
+                                        .on_hover_text("How to resolve this conflict: keep the existing entry, prefer the incoming one, or combine metadata");
                                     if decision != original {
                                         let _ = review.set_decision(index, decision);
                                     }

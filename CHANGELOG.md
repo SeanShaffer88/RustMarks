@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Descriptive tooltips (action + side effects) on buttons, tabs, text fields, combo boxes and the diff toggle. Not yet covered: sidebar navigation items, the `+`/`−` tree toggles, and the generated file-menu entry at `editor.rs` (`ui.button(label)`).
+
 ## 0.2.0 - 2026-11-07
 
 ### Added (release)

@@ -320,9 +320,12 @@ impl Studio {
         let changes_label = self.changes_tab_label();
         ui.horizontal(|ui| {
             [
-                ui.selectable_value(&mut self.tab, Tab::Grid, "▤  Bookmarks"),
-                ui.selectable_value(&mut self.tab, Tab::Details, "≡  Details"),
-                ui.selectable_value(&mut self.tab, Tab::Diff, changes_label),
+                ui.selectable_value(&mut self.tab, Tab::Grid, "▤  Bookmarks")
+                    .on_hover_text("Edit bookmarks in the grid"),
+                ui.selectable_value(&mut self.tab, Tab::Details, "≡  Details")
+                    .on_hover_text("Edit notes, tags, URL and favicon of the selected bookmark"),
+                ui.selectable_value(&mut self.tab, Tab::Diff, changes_label)
+                    .on_hover_text("Review uncommitted changes before saving"),
             ]
         })
         .inner
@@ -526,20 +529,20 @@ impl Studio {
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         egui::menu::bar(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("Open bookmarks…       Ctrl+O").clicked() {
+                if ui.button("Open bookmarks…       Ctrl+O").on_hover_text("Open a bookmark file (HTML, Chrome/Edge JSON or RustMarks JSON). Prompts if there are unsaved changes.").clicked() {
                     ui.close_menu();
                     self.request_open();
                 }
-                if ui.button("Save                         Ctrl+S").clicked() {
+                if ui.button("Save                         Ctrl+S").on_hover_text("Save to the opened file. Refuses if the file changed on disk; a safety snapshot is taken first.").clicked() {
                     ui.close_menu();
                     self.save(false);
                 }
-                if ui.button("Save as…       Ctrl+Shift+S").clicked() {
+                if ui.button("Save as…       Ctrl+Shift+S").on_hover_text("Save to a new file. The original file is left untouched.").clicked() {
                     ui.close_menu();
                     self.save(true);
                 }
                 ui.separator();
-                if ui.button("Merge files…").clicked() {
+                if ui.button("Merge files…").on_hover_text("Choose files to merge into this library. Opens the Merge view; nothing is written to disk.").clicked() {
                     ui.close_menu();
                     self.begin_merge();
                 }
@@ -550,6 +553,7 @@ impl Studio {
                         self.undo.can_undo(),
                         egui::Button::new("Undo document edit"),
                     )
+                    .on_hover_text("Undo the last document edit · Ctrl+Z")
                     .clicked()
                 {
                     self.undo_edit();
@@ -560,6 +564,7 @@ impl Studio {
                         self.undo.can_redo(),
                         egui::Button::new("Redo document edit"),
                     )
+                    .on_hover_text("Redo the last undone edit · Ctrl+Y")
                     .clicked()
                 {
                     self.redo_edit();
@@ -582,7 +587,7 @@ impl Studio {
                 }
             });
             ui.menu_button("Tools", |ui| {
-                if ui.button("Scan categorization suggestions").clicked() {
+                if ui.button("Scan categorization suggestions").on_hover_text("Scan bookmarks with the local rules and propose folders. Does not move anything.").clicked() {
                     if self.snapshot("suggest") {
                         heuristics::suggest_with(&mut self.doc, &self.rules);
                         self.view = View::Organizer;
@@ -591,7 +596,11 @@ impl Studio {
                 }
             });
             ui.menu_button("Help", |ui| {
-                if ui.button("Settings & keyboard shortcuts").clicked() {
+                if ui
+                    .button("Settings & keyboard shortcuts")
+                    .on_hover_text("Open settings, shortcuts and the categorization rules editor.")
+                    .clicked()
+                {
                     self.view = View::Settings;
                     ui.close_menu();
                 }
@@ -609,7 +618,11 @@ impl Studio {
                 {
                     self.save(false);
                 }
-                if ui.small_button("Open").clicked() {
+                if ui
+                    .small_button("Open")
+                    .on_hover_text("Open a bookmark file. Prompts if there are unsaved changes.")
+                    .clicked()
+                {
                     self.request_open();
                 }
             });
@@ -622,12 +635,14 @@ impl Studio {
             egui::TextEdit::singleline(&mut self.query)
                 .hint_text("Search · tag:dev -broken")
                 .desired_width(f32::INFINITY),
-        );
+        )
+        .on_hover_text("Search titles, URLs, tags and notes. Use tag:name and -word to exclude.");
         if ui
             .selectable_label(
                 self.folder.is_none(),
                 format!("All bookmarks  ({})", self.doc.items().len()),
             )
+            .on_hover_text("Show bookmarks from every folder")
             .clicked()
         {
             self.folder = None;
@@ -646,6 +661,7 @@ impl Studio {
                     .show(ui, |ui| {
                         if ui
                             .selectable_label(*selected == Some(*id), "Folder contents")
+                            .on_hover_text("Show only this folder's bookmarks")
                             .clicked()
                         {
                             *selected = Some(*id);
@@ -664,9 +680,9 @@ impl Studio {
                 if let Some(BookmarkNode::Folder { title, .. }) = self.doc.root_folder.find_mut(id)
                 {
                     ui.label("Folder name");
-                    ui.text_edit_singleline(title);
+                    ui.text_edit_singleline(title).on_hover_text("Folder name");
                 }
-                if ui.button("Delete folder and contents").clicked()
+                if ui.button("Delete folder and contents").on_hover_text("Delete this folder and every bookmark in it. A snapshot is taken first; undo with Ctrl+Z.").clicked()
                     && self.snapshot("delete-folder")
                 {
                     let mut ids = HashSet::new();
@@ -677,7 +693,12 @@ impl Studio {
                 }
             }
         }
-        if ui.button("+ New folder").clicked() && self.snapshot("new-folder") {
+        if ui
+            .button("+ New folder")
+            .on_hover_text("Add an empty folder under the current one. A snapshot is taken first.")
+            .clicked()
+            && self.snapshot("new-folder")
+        {
             self.doc
                 .add(self.folder, BookmarkNode::folder("New folder"));
         }
@@ -689,17 +710,33 @@ impl Studio {
     }
     fn grid(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui.button("+ Bookmark").clicked() && self.snapshot("add") {
+            if ui
+                .button("+ Bookmark")
+                .on_hover_text(
+                    "Add a blank bookmark to the current folder. A snapshot is taken first.",
+                )
+                .clicked()
+                && self.snapshot("add")
+            {
                 let b = BookmarkItem::new("Untitled bookmark", "https://");
                 self.selected.clear();
                 self.selected.insert(b.id);
                 self.doc.add(self.folder, BookmarkNode::Bookmark(b));
             }
             ui.label(format!("{} selected", self.selected.len()));
-            if ui.button("Select all filtered").clicked() {
+            if ui
+                .button("Select all filtered")
+                .on_hover_text("Select every bookmark matching the current search.")
+                .clicked()
+            {
                 self.selected = self.visible().iter().map(|b| b.id).collect();
             }
-            if ui.button("Delete selected").clicked()
+            if ui
+                .button("Delete selected")
+                .on_hover_text(
+                    "Delete the selected bookmarks. A snapshot is taken first; undo with Ctrl+Z.",
+                )
+                .clicked()
                 && !self.selected.is_empty()
                 && self.snapshot("delete")
             {
@@ -712,8 +749,9 @@ impl Studio {
                 egui::TextEdit::singleline(&mut self.bulk_tag)
                     .hint_text("Tag for selected bookmarks")
                     .desired_width(220.),
-            );
-            if ui.button("Apply tag").clicked()
+            )
+            .on_hover_text("Tag to add to every selected bookmark");
+            if ui.button("Apply tag").on_hover_text("Add the typed tag to every selected bookmark.").clicked()
                 && !self.bulk_tag.trim().is_empty()
                 && !self.selected.is_empty()
                 && self.snapshot("bulk-tag")
@@ -726,7 +764,7 @@ impl Studio {
                     }
                 });
             }
-            if ui.button("Clean tracking URLs").clicked()
+            if ui.button("Clean tracking URLs").on_hover_text("Remove utm_*, fbclid, gclid and msclkid parameters from selected URLs. Signed URLs are left alone.").clicked()
                 && !self.selected.is_empty()
                 && self.snapshot("clean-urls")
             {
@@ -751,12 +789,15 @@ impl Studio {
                     for (id, path) in &folders {
                         ui.selectable_value(&mut self.move_target, Some(*id), path);
                     }
-                });
+                })
+                .response
+                .on_hover_text("Destination folder for the selected bookmarks");
             if ui
                 .add_enabled(
                     self.move_target.is_some() && !self.selected.is_empty(),
                     egui::Button::new("Move selected"),
                 )
+                .on_hover_text("Move the selected bookmarks to the chosen folder; identity is preserved. A snapshot is taken first.")
                 .clicked()
                 && self.snapshot("move")
             {
@@ -837,6 +878,7 @@ impl Studio {
                             let selected = self.selected.contains(&bookmark.id);
                             if ui
                                 .selectable_label(selected, format!("{:02}", index + 1))
+                                .on_hover_text("Click to select; Ctrl-click toggles; Shift-click selects a range")
                                 .clicked()
                             {
                                 let modifiers = ui.input(|i| i.modifiers);
@@ -872,7 +914,8 @@ impl Studio {
                                     egui::TextEdit::singleline(value)
                                         .id(egui::Id::new(("cell", bookmark.id, col)))
                                         .desired_width(f32::INFINITY),
-                                );
+                                )
+                                .on_hover_text("Edit this cell. Enter/Up/Down move rows, Tab moves cells, Ctrl+Z undoes.");
                                 if self.focus_request == Some((bookmark.id, col)) {
                                     response.request_focus();
                                     self.focus_request = None;
@@ -945,9 +988,11 @@ impl Studio {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("Bookmark details");
             ui.label("Title");
-            ui.text_edit_singleline(&mut bookmark.title);
+            ui.text_edit_singleline(&mut bookmark.title)
+                .on_hover_text("Bookmark title");
             ui.label("URL");
-            ui.text_edit_singleline(&mut bookmark.url);
+            ui.text_edit_singleline(&mut bookmark.url)
+                .on_hover_text("Bookmark URL. Stored exactly as typed.");
             if url::Url::parse(&bookmark.url).is_err() {
                 ui.colored_label(theme::RED, "This URL is not valid.");
             }
@@ -956,10 +1001,15 @@ impl Studio {
                 egui::TextEdit::multiline(&mut bookmark.notes)
                     .desired_rows(6)
                     .desired_width(f32::INFINITY),
-            );
+            )
+            .on_hover_text("Free-form notes saved with the bookmark");
             ui.label("Tags (comma-separated)");
             let mut tags = bookmark.tags.join(", ");
-            if ui.text_edit_singleline(&mut tags).changed() {
+            if ui
+                .text_edit_singleline(&mut tags)
+                .on_hover_text("Comma-separated tags, e.g. dev, rust")
+                .changed()
+            {
                 bookmark.tags = tags
                     .split(',')
                     .map(str::trim)
@@ -970,7 +1020,7 @@ impl Studio {
             ui.separator();
             ui.label("Favicon (embedded locally; never fetched)");
             ui.horizontal(|ui| {
-                if ui.button("Choose image…").clicked() {
+                if ui.button("Choose image…").on_hover_text("Import a PNG, JPEG, ICO or GIF as this bookmark's 32px favicon. Stored locally; nothing is fetched online.").clicked() {
                     if let Some(path) = rfd::FileDialog::new()
                         .add_filter("Images", &["png", "ico", "jpg", "jpeg", "gif"])
                         .pick_file()
@@ -987,13 +1037,14 @@ impl Studio {
                         }
                     }
                 }
-                if ui.button("Clear favicon").clicked() {
+                if ui.button("Clear favicon").on_hover_text("Remove this bookmark's favicon.").clicked() {
                     bookmark.favicon_base64 = None;
                 }
             });
             let mut icon = bookmark.favicon_base64.clone().unwrap_or_default();
             if ui
                 .add(egui::TextEdit::singleline(&mut icon).hint_text("data:image/png;base64,…"))
+                .on_hover_text("Favicon as a data: URL. Prefer Choose image… for local files.")
                 .changed()
             {
                 bookmark.favicon_base64 = if icon.is_empty() { None } else { Some(icon) };
@@ -1033,11 +1084,12 @@ impl Studio {
     fn diff(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Staged changes");
-            ui.checkbox(&mut self.unified, "Unified view");
-            if ui.button("Commit / Save").clicked() {
+            ui.checkbox(&mut self.unified, "Unified view")
+                .on_hover_text("Show one combined diff instead of side by side");
+            if ui.button("Commit / Save").on_hover_text("Write the staged changes to disk. A safety snapshot is taken first.").clicked() {
                 self.save(false);
             }
-            if ui.button("Revert all…").clicked() {
+            if ui.button("Revert all…").on_hover_text("Discard all changes and restore the last committed document. A snapshot is taken first.").clicked() {
                 self.pending_open = false;
                 self.confirm_discard = true;
             }
@@ -1155,11 +1207,11 @@ impl Studio {
         ui.label("Local domain and keyword rules. No cloud services, no tracking.");
         ui.add_space(12.);
         ui.horizontal(|ui| {
-            if ui.button("Scan suggestions").clicked() && self.snapshot("suggest") {
+            if ui.button("Scan suggestions").on_hover_text("Scan bookmarks with the local rules and propose folders. Does not move anything.").clicked() && self.snapshot("suggest") {
                 heuristics::suggest_with(&mut self.doc, &self.rules);
                 self.message = "Suggestions ready. Review below before organizing.".into();
             }
-            if ui.button("Accept all → folders").clicked() && self.snapshot("organize") {
+            if ui.button("Accept all → folders").on_hover_text("Move every suggested bookmark into its category folder. A snapshot is taken first.").clicked() && self.snapshot("organize") {
                 heuristics::organize(&mut self.doc);
                 self.tab = Tab::Diff;
                 self.view = View::Explorer;
@@ -1175,7 +1227,7 @@ impl Studio {
                 ui.horizontal(|ui| {
                     ui.label(&b.title);
                     ui.colored_label(theme::GREEN, b.category_guess.as_deref().unwrap_or(""));
-                    if ui.button("Accept").clicked() && self.snapshot("categorize") {
+                    if ui.button("Accept").on_hover_text("Move this bookmark into the suggested folder. A snapshot is taken first.").clicked() && self.snapshot("categorize") {
                         // Move this bookmark only; retain its identity for the staged diff.
                         let category = b.category_guess.clone().unwrap();
                         let mut ids = HashSet::new();
@@ -1227,13 +1279,22 @@ impl Studio {
         ui.heading("Version History");
         ui.label("Compressed local snapshots. Restoring stages a working copy; it does not overwrite your file.");
         ui.horizontal(|ui| {
-            if ui.button("Refresh").clicked() {
+            if ui
+                .button("Refresh")
+                .on_hover_text("Reload the list of saved snapshots from disk.")
+                .clicked()
+            {
                 match self.history.list() {
                     Ok(s) => self.snapshots = s,
                     Err(e) => self.message = e.to_string(),
                 }
             }
-            if ui.button("Create snapshot").clicked() && self.snapshot("manual") {
+            if ui
+                .button("Create snapshot")
+                .on_hover_text("Save a compressed snapshot of the working copy to local history.")
+                .clicked()
+                && self.snapshot("manual")
+            {
                 self.snapshots = self.history.list().unwrap_or_default();
             }
         });
@@ -1247,10 +1308,10 @@ impl Studio {
             .show(ui, |ui| {
                 for s in &self.snapshots {
                     ui.horizontal(|ui| {
-                        if ui.button("Inspect").clicked() {
+                        if ui.button("Inspect").on_hover_text("Compare this snapshot with the working copy without changing anything.").clicked() {
                             inspect = Some(s.clone());
                         }
-                        if ui.button("Restore").clicked() {
+                        if ui.button("Restore").on_hover_text("Load this snapshot into the working copy. Review and save to commit; a snapshot is taken first.").clicked() {
                             restore = Some(s.clone());
                         }
                         ui.label(&s.label);
@@ -1319,7 +1380,7 @@ impl Studio {
             self.history.directory.display()
         ));
         ui.separator();
-        if ui.button("Export Chrome / Edge JSON…").clicked() {
+        if ui.button("Export Chrome / Edge JSON…").on_hover_text("Export a browser-compatible JSON file. RustMarks-only metadata (notes, tags) is omitted.").clicked() {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("Chrome JSON", &["json"])
                 .set_file_name("bookmarks-chrome.json")
@@ -1342,9 +1403,12 @@ impl Studio {
                 .code_editor()
                 .desired_rows(14)
                 .desired_width(f32::INFINITY),
+        )
+        .on_hover_text(
+            "Categorization rules as JSON. Validate and save to apply; bookmarks are not moved.",
         );
         ui.horizontal(|ui| {
-            if ui.button("Validate and save rules").clicked() {
+            if ui.button("Validate and save rules").on_hover_text("Check the rules JSON and, if valid, save it as the active dictionary. Bookmarks are not moved.").clicked() {
                 match RuleSet::parse(&self.rules_text) {
                     Ok(rules) => {
                         let path = self
@@ -1371,7 +1435,7 @@ impl Studio {
                     }
                 }
             }
-            if ui.button("Load default rules into editor").clicked() {
+            if ui.button("Load default rules into editor").on_hover_text("Replace the editor text with the built-in rules. Nothing is saved until you validate and save.").clicked() {
                 self.rules_text =
                     serde_json::to_string_pretty(&RuleSet::default()).unwrap_or_default();
             }
@@ -1422,7 +1486,13 @@ impl eframe::App for Studio {
                         "Your unsaved edits will be discarded. A safety snapshot is created first.",
                     );
                     ui.horizontal(|ui| {
-                        if ui.button("Discard changes").clicked() && self.snapshot("before-discard")
+                        if ui
+                            .button("Discard changes")
+                            .on_hover_text(
+                                "Throw away unsaved changes. A safety snapshot is taken first.",
+                            )
+                            .clicked()
+                            && self.snapshot("before-discard")
                         {
                             self.doc = self.original.clone();
                             self.confirm_discard = false;
@@ -1431,7 +1501,11 @@ impl eframe::App for Studio {
                                 self.open();
                             }
                         }
-                        if ui.button("Keep editing").clicked() {
+                        if ui
+                            .button("Keep editing")
+                            .on_hover_text("Close this prompt and return to the editor.")
+                            .clicked()
+                        {
                             self.confirm_discard = false;
                             self.pending_open = false;
                         }
@@ -1445,20 +1519,34 @@ impl eframe::App for Studio {
                 .show(ctx, |ui| {
                     ui.label("Save your changes before closing RustMarks?");
                     ui.horizontal(|ui| {
-                        if ui.button("Save").clicked() {
+                        if ui
+                            .button("Save")
+                            .on_hover_text("Save the document, then continue.")
+                            .clicked()
+                        {
                             self.save(false);
                             if !self.dirty() {
                                 self.confirm_close = false;
                                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                             }
                         }
-                        if ui.button("Discard and close").clicked() && self.snapshot("before-close")
+                        if ui
+                            .button("Discard and close")
+                            .on_hover_text(
+                                "Close without saving. A safety snapshot is taken first.",
+                            )
+                            .clicked()
+                            && self.snapshot("before-close")
                         {
                             self.original = self.doc.clone();
                             self.confirm_close = false;
                             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui
+                            .button("Cancel")
+                            .on_hover_text("Close this prompt; nothing changes.")
+                            .clicked()
+                        {
                             self.confirm_close = false;
                         }
                     });
