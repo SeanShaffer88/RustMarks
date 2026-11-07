@@ -7,10 +7,8 @@ An offline-first, native **Rust / egui desktop bookmark studio**, designed for W
 Download from the GitHub release page:
 
 - `RustMarks-v<version>-x64-Setup.exe` — per-user installer (no admin rights, offline, no prerequisites).
-- `RustMarks-v<version>-x64.msi` — the same install as an MSI (silent: `msiexec /i RustMarks-v<version>-x64.msi /qn`).
 - `RustMarks-v<version>-x64-Portable.zip` — unzip anywhere; all data stays in `data/` beside the exe (see Portable mode).
-- `RustMarks-v<version>-x64.exe` — bare executable (per-user data).
-- `SHA256SUMS.txt` — checksums for every file. The binaries are not code-signed, so SmartScreen may warn.
+- `SHA256SUMS.txt` — checksums for both files. The binaries are not code-signed, so SmartScreen may warn.
 
 ## Build from source
 

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed (release contents)
+- Releases now publish only `RustMarks-v<ver>-x64-Portable.zip` and `RustMarks-v<ver>-x64-Setup.exe`, plus `SHA256SUMS.txt`. The bare exe and the standalone MSI are no longer release assets (the MSI remains embedded in Setup.exe). The v1.0.0 release was trimmed to match.
+
 ## 1.0.0 - 2026-11-07
 
 First stable release. Everything in 0.1.0–0.3.0, plus the installer, portable mode and tooltip work below.
