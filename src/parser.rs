@@ -5,16 +5,22 @@ use std::path::Path;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 pub fn load(path: &Path) -> Result<BookmarkDocument> {
+    if std::fs::metadata(path)?.len() > 64 * 1024 * 1024 {
+        return Err("Bookmark file exceeds the 64 MiB import limit".into());
+    }
     let text = std::fs::read_to_string(path)?;
     let mut doc = parse(&text)?;
     doc.source_path = Some(path.display().to_string());
     Ok(doc)
 }
 pub fn parse(text: &str) -> Result<BookmarkDocument> {
+    let text = text.trim_start_matches('\u{feff}');
     if text.trim_start().starts_with('{') {
         let value: Value = serde_json::from_str(text)?;
         if value.get("root_folder").is_some() {
-            return Ok(serde_json::from_value(value)?);
+            let doc: BookmarkDocument = serde_json::from_value(value)?;
+            doc.validate()?;
+            return Ok(doc);
         }
         let roots = value
             .get("roots")
@@ -25,18 +31,24 @@ pub fn parse(text: &str) -> Result<BookmarkDocument> {
             .values()
             .filter(|n| n.is_object() && n.get("type").is_some())
         {
-            doc.add(None, chrome_node(node)?);
+            doc.add(None, chrome_node(node, 0)?);
         }
         return Ok(doc);
     }
     parse_html(text)
 }
-fn chrome_node(v: &Value) -> Result<BookmarkNode> {
+fn chrome_node(v: &Value, depth: usize) -> Result<BookmarkNode> {
+    if depth > 128 {
+        return Err("Folder nesting exceeds 128 levels".into());
+    }
+    if v["type"] != "url" && v["type"] != "folder" {
+        return Err("Unsupported Chrome bookmark node type".into());
+    }
     let title = v["name"].as_str().unwrap_or("Untitled");
     let date = v["date_added"]
         .as_str()
-        .and_then(|s| s.parse::<i64>().ok())
-        .map(|n| n / 1_000_000 - 11_644_473_600)
+        .and_then(|s| s.parse::<i128>().ok())
+        .and_then(|n| i64::try_from(n / 1_000_000 - 11_644_473_600).ok())
         .unwrap_or(0);
     if v["type"] == "url" {
         let mut b = BookmarkItem::new(title, v["url"].as_str().ok_or("Bookmark missing URL")?);
@@ -53,7 +65,7 @@ fn chrome_node(v: &Value) -> Result<BookmarkNode> {
             *date_added = date;
             if let Some(entries) = v["children"].as_array() {
                 for child in entries {
-                    children.push(chrome_node(child)?);
+                    children.push(chrome_node(child, depth + 1)?);
                 }
             }
         }
@@ -122,8 +134,35 @@ fn parse_html(text: &str) -> Result<BookmarkDocument> {
                     pos = stop + close.len();
                 }
             }
+            "dd" => {
+                let stop = ["<dt", "</dl", "</dd"]
+                    .iter()
+                    .filter_map(|end| lower[pos..].find(end).map(|n| n + pos))
+                    .min()
+                    .unwrap_or(text.len());
+                let fragment = Html::parse_fragment(&text[pos..stop]);
+                let notes = fragment
+                    .root_element()
+                    .text()
+                    .collect::<String>()
+                    .trim()
+                    .to_owned();
+                if let Some(BookmarkNode::Bookmark(b)) = stack
+                    .last_mut()
+                    .and_then(|n| n.children_mut())
+                    .and_then(|c| c.last_mut())
+                {
+                    if b.notes.is_empty() {
+                        b.notes = notes;
+                    }
+                }
+                pos = stop;
+            }
             "dl" => {
                 if let Some(folder) = pending.take() {
+                    if stack.len() >= 128 {
+                        return Err("Folder nesting exceeds 128 levels".into());
+                    }
                     stack.push(folder);
                 } else if !outer {
                     outer = true;
@@ -171,18 +210,23 @@ pub fn html(doc: &BookmarkDocument) -> String {
                 }
                 out.push_str("</DL><p>\n");
             }
-            BookmarkNode::Bookmark(b) => out.push_str(&format!(
-                "<DT><A HREF=\"{}\" ADD_DATE=\"{}\" TAGS=\"{}\" DATA-NOTES=\"{}\"{}>{}</A>\n",
-                escape(&b.url),
-                b.date_added,
-                escape(&b.tags.join(",")),
-                escape(&b.notes),
-                b.favicon_base64
-                    .as_ref()
-                    .map(|s| format!(" ICON=\"{}\"", escape(s)))
-                    .unwrap_or_default(),
-                escape(&b.title)
-            )),
+            BookmarkNode::Bookmark(b) => {
+                out.push_str(&format!(
+                    "<DT><A HREF=\"{}\" ADD_DATE=\"{}\" TAGS=\"{}\" DATA-NOTES=\"{}\"{}>{}</A>\n",
+                    escape(&b.url),
+                    b.date_added,
+                    escape(&b.tags.join(",")),
+                    escape(&b.notes),
+                    b.favicon_base64
+                        .as_ref()
+                        .map(|s| format!(" ICON=\"{}\"", escape(s)))
+                        .unwrap_or_default(),
+                    escape(&b.title)
+                ));
+                if !b.notes.is_empty() {
+                    out.push_str(&format!("<DD>{}\n", escape(&b.notes)));
+                }
+            }
         }
     }
     let mut out = "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<META HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html; charset=UTF-8\">\n<TITLE>Bookmarks</TITLE>\n<DL><p>\n".to_owned();
@@ -194,11 +238,18 @@ pub fn html(doc: &BookmarkDocument) -> String {
     out.push_str("</DL><p>\n");
     out
 }
+fn chrome_date(unix: i64) -> String {
+    i128::from(unix)
+        .saturating_add(11_644_473_600)
+        .saturating_mul(1_000_000)
+        .max(0)
+        .to_string()
+}
 pub fn chrome(doc: &BookmarkDocument) -> Value {
     fn node(n: &BookmarkNode) -> Value {
         match n {
             BookmarkNode::Bookmark(b) => {
-                json!({"type":"url", "name":b.title,"url":b.url,"date_added":((b.date_added+11_644_473_600)*1_000_000).to_string()})
+                json!({"type":"url", "name":b.title,"url":b.url,"date_added":chrome_date(b.date_added)})
             }
             BookmarkNode::Folder {
                 title,
@@ -206,13 +257,14 @@ pub fn chrome(doc: &BookmarkDocument) -> Value {
                 date_added,
                 ..
             } => {
-                json!({"type":"folder","name":title,"children":children.iter().map(node).collect::<Vec<_>>(),"date_added":((date_added+11_644_473_600)*1_000_000).to_string()})
+                json!({"type":"folder","name":title,"children":children.iter().map(node).collect::<Vec<_>>(),"date_added":chrome_date(*date_added)})
             }
         }
     }
     json!({"version":1,"roots":{"bookmark_bar":node(&doc.root_folder)}})
 }
 pub fn save(doc: &BookmarkDocument, path: &Path) -> Result<()> {
+    doc.validate()?;
     let data = if path
         .extension()
         .and_then(|s| s.to_str())
@@ -222,17 +274,5 @@ pub fn save(doc: &BookmarkDocument, path: &Path) -> Result<()> {
     } else {
         serde_json::to_string_pretty(doc)?
     };
-    // Same-directory temporary file keeps an interrupted write away from the active file.
-    let temp = path.with_file_name(format!(".rustmarks-{}.tmp", uuid::Uuid::new_v4()));
-    {
-        use std::io::Write;
-        let mut f = std::fs::File::create(&temp)?;
-        f.write_all(data.as_bytes())?;
-        f.sync_all()?;
-    }
-    if let Err(e) = std::fs::rename(&temp, path) {
-        let _ = std::fs::remove_file(&temp);
-        return Err(e.into());
-    }
-    Ok(())
+    crate::storage::atomic_write(path, data.as_bytes())
 }

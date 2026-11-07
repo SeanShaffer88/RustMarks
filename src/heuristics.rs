@@ -1,57 +1,11 @@
 use crate::models::*;
-const RULES: &[(&str, &[&str], &[&str])] = &[
-    (
-        "Developer & Tech",
-        &[
-            "github.com",
-            "stackoverflow.com",
-            "crates.io",
-            "docs.rs",
-            "developer.mozilla.org",
-        ],
-        &["api", "code", "rust", "compiler"],
-    ),
-    (
-        "Design & UI",
-        &["figma.com", "dribbble.com", "behance.net"],
-        &["ui", "ux", "design"],
-    ),
-    (
-        "News & Reading",
-        &["news.ycombinator.com", "medium.com", "substack.com"],
-        &["news", "article", "reading"],
-    ),
-    (
-        "Productivity & Tools",
-        &["notion.so", "linear.app"],
-        &["productivity", "workflow", "tasks"],
-    ),
-];
+use crate::rules::RuleSet;
 pub fn classify(b: &BookmarkItem) -> Option<String> {
-    let parsed = url::Url::parse(&b.url).ok();
-    let host = parsed.as_ref().and_then(|u| u.host_str()).unwrap_or("");
-    let text = format!(
-        "{} {} {}",
-        b.title,
-        parsed.as_ref().map(|u| u.path()).unwrap_or(""),
-        b.tags.join(" ")
-    )
-    .to_lowercase();
-    let tokens: Vec<_> = text.split(|c: char| !c.is_alphanumeric()).collect();
-    RULES
-        .iter()
-        .map(|(name, domains, keywords)| {
-            let score = domains
-                .iter()
-                .filter(|d| host == **d || host.ends_with(&format!(".{d}")))
-                .count()
-                * 10
-                + keywords.iter().filter(|k| tokens.contains(k)).count();
-            (*name, score)
-        })
-        .filter(|(_, s)| *s > 0)
-        .max_by_key(|(_, s)| *s)
-        .map(|(n, _)| n.to_owned())
+    RuleSet::default().classify(b)
+}
+pub fn suggest_with(doc: &mut BookmarkDocument, rules: &RuleSet) {
+    doc.root_folder
+        .visit_mut(&mut |b| b.category_guess = rules.classify(b));
 }
 pub fn suggest(doc: &mut BookmarkDocument) {
     doc.root_folder

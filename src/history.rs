@@ -1,6 +1,9 @@
 use crate::{models::BookmarkDocument, parser::Result};
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
-use std::{io::Write, path::PathBuf};
+use std::{
+    io::{Read, Write},
+    path::PathBuf,
+};
 #[derive(Clone)]
 pub struct Snapshot {
     pub path: PathBuf,
@@ -35,11 +38,10 @@ impl History {
             uuid::Uuid::new_v4()
         );
         let target = self.directory.join(name);
-        let temp = target.with_extension("tmp");
-        let mut encoder = GzEncoder::new(std::fs::File::create(&temp)?, Compression::default());
+        doc.validate()?;
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&serde_json::to_vec(doc)?)?;
-        encoder.finish()?.sync_all()?;
-        std::fs::rename(temp, target)?;
+        crate::storage::atomic_write(&target, &encoder.finish()?)?;
         Ok(())
     }
     pub fn list(&self) -> Result<Vec<Snapshot>> {
@@ -64,8 +66,14 @@ impl History {
         Ok(out)
     }
     pub fn restore(&self, snapshot: &Snapshot) -> Result<BookmarkDocument> {
-        Ok(serde_json::from_reader(GzDecoder::new(
-            std::fs::File::open(&snapshot.path)?,
-        ))?)
+        let decoder = GzDecoder::new(std::fs::File::open(&snapshot.path)?);
+        let mut bytes = Vec::new();
+        decoder.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes)?;
+        if bytes.len() > 64 * 1024 * 1024 {
+            return Err("Snapshot exceeds the 64 MiB restore limit".into());
+        }
+        let doc: BookmarkDocument = serde_json::from_slice(&bytes)?;
+        doc.validate()?;
+        Ok(doc)
     }
 }

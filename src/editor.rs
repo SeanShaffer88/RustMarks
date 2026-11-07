@@ -1,11 +1,15 @@
 use crate::vscode_theme as theme;
 use egui::{Color32, RichText};
 use rustmarks::{
-    diff_view, heuristics,
+    diff_view,
+    grid::{self, Direction},
+    heuristics,
     history::{History, Snapshot},
     merge::{self, Resolution},
     models::*,
     parser,
+    rules::RuleSet,
+    undo::UndoHistory,
 };
 use std::{collections::HashSet, path::PathBuf};
 use uuid::Uuid;
@@ -43,12 +47,46 @@ pub struct Studio {
     confirm_discard: bool,
     pending_open: bool,
     confirm_close: bool,
+    rules: RuleSet,
+    rules_text: String,
+    undo: UndoHistory,
+    checkpoint: BookmarkDocument,
+    last_edit: Option<std::time::Instant>,
+    navigating_history: bool,
+    cell_focus: Option<(Uuid, usize)>,
+    focus_request: Option<(Uuid, usize)>,
+    icon_texture: Option<(String, egui::TextureHandle)>,
+    diff_collapsed: HashSet<Uuid>,
+    move_target: Option<Uuid>,
+    inspected_snapshot: Option<(Snapshot, BookmarkDocument)>,
+    imported_browser_json: bool,
 }
 impl Default for Studio {
     fn default() -> Self {
         let doc = BookmarkDocument::default();
+        let history = History::default();
+        let rules_path = history
+            .directory
+            .parent()
+            .unwrap_or(&history.directory)
+            .join("rules.json");
+        let loaded_rules = if rules_path.exists() {
+            std::fs::read_to_string(&rules_path)
+                .map_err(|e| e.to_string())
+                .and_then(|s| RuleSet::parse(&s).map_err(|e| e.to_string()))
+        } else {
+            Ok(RuleSet::default())
+        };
+        let message = loaded_rules
+            .as_ref()
+            .err()
+            .map(|e| format!("Custom rules could not be loaded; using defaults: {e}"))
+            .unwrap_or_else(|| "Ready. Open a bookmark file to get started.".into());
+        let rules = loaded_rules.unwrap_or_default();
+        let rules_text = serde_json::to_string_pretty(&rules).unwrap_or_default();
         Self {
             original: doc.clone(),
+            checkpoint: doc.clone(),
             doc,
             view: View::Explorer,
             tab: Tab::Grid,
@@ -57,7 +95,7 @@ impl Default for Studio {
             selected: HashSet::new(),
             anchor: None,
             bulk_tag: String::new(),
-            message: "Ready. Open a bookmark file to get started.".into(),
+            message,
             history: History::default(),
             snapshots: vec![],
             pending_merge: None,
@@ -67,10 +105,45 @@ impl Default for Studio {
             confirm_discard: false,
             pending_open: false,
             confirm_close: false,
+            rules,
+            rules_text,
+            undo: UndoHistory::default(),
+            last_edit: None,
+            navigating_history: false,
+            cell_focus: None,
+            focus_request: None,
+            icon_texture: None,
+            diff_collapsed: HashSet::new(),
+            move_target: None,
+            inspected_snapshot: None,
+            imported_browser_json: false,
         }
     }
 }
 impl Studio {
+    fn undo_edit(&mut self) {
+        let source_path = self.doc.source_path.clone();
+        if self.undo.undo(&mut self.doc) {
+            self.doc.source_path = source_path;
+            self.checkpoint = self.doc.clone();
+            self.last_edit = None;
+            self.navigating_history = true;
+            self.selected.clear();
+            self.folder = None;
+        }
+    }
+    fn redo_edit(&mut self) {
+        let source_path = self.doc.source_path.clone();
+        if self.undo.redo(&mut self.doc) {
+            self.doc.source_path = source_path;
+            self.checkpoint = self.doc.clone();
+            self.last_edit = None;
+            self.navigating_history = true;
+            self.selected.clear();
+            self.folder = None;
+        }
+    }
+
     fn dirty(&self) -> bool {
         self.doc != self.original
     }
@@ -90,8 +163,23 @@ impl Studio {
         {
             match parser::load(&path) {
                 Ok(doc) => {
+                    self.imported_browser_json = std::fs::read_to_string(&path)
+                        .ok()
+                        .and_then(|s| {
+                            serde_json::from_str::<serde_json::Value>(
+                                s.trim_start_matches('\u{feff}'),
+                            )
+                            .ok()
+                        })
+                        .is_some_and(|v| v.get("roots").is_some());
                     self.original = doc.clone();
                     self.doc = doc;
+                    self.undo = UndoHistory::default();
+                    self.checkpoint = self.doc.clone();
+                    self.last_edit = None;
+                    self.cell_focus = None;
+                    self.pending_merge = None;
+                    self.merge_base = None;
                     self.folder = None;
                     self.selected.clear();
                     self.message = "File opened locally. No data leaves this device.".into();
@@ -101,7 +189,7 @@ impl Studio {
         }
     }
     fn save(&mut self, save_as: bool) {
-        let path = if save_as || self.doc.source_path.is_none() {
+        let path = if save_as || self.doc.source_path.is_none() || self.imported_browser_json {
             rfd::FileDialog::new()
                 .add_filter("RustMarks JSON (all metadata)", &["json"])
                 .add_filter("Netscape bookmarks", &["html"])
@@ -111,6 +199,12 @@ impl Studio {
             self.doc.source_path.as_ref().map(PathBuf::from)
         };
         if let Some(path) = path {
+            if self.imported_browser_json
+                && self.doc.source_path.as_deref() == Some(path.to_string_lossy().as_ref())
+            {
+                self.message="Choose a new working file to preserve the original Chrome/Edge JSON. Use Settings to export browser JSON.".into();
+                return;
+            }
             if !self.snapshot("before-save") {
                 return;
             }
@@ -123,6 +217,8 @@ impl Studio {
             doc.source_path = Some(path.display().to_string());
             match parser::save(&doc, &path) {
                 Ok(()) => {
+                    self.checkpoint.source_path = doc.source_path.clone();
+                    self.imported_browser_json = false;
                     self.doc = doc.clone();
                     self.original = doc;
                     self.message = format!("Saved {}", path.display());
@@ -192,6 +288,18 @@ impl Studio {
             }
             if ui.button("Merge files…").clicked() {
                 self.begin_merge();
+            }
+            if ui
+                .add_enabled(self.undo.can_undo(), egui::Button::new("Undo"))
+                .clicked()
+            {
+                self.undo_edit();
+            }
+            if ui
+                .add_enabled(self.undo.can_redo(), egui::Button::new("Redo"))
+                .clicked()
+            {
+                self.redo_edit();
             }
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.label(RichText::new("●  OFFLINE").small().color(theme::GREEN));
@@ -323,6 +431,35 @@ impl Studio {
                 });
             }
         });
+        ui.horizontal(|ui| {
+            let folders = self.doc.folders();
+            let label = folders
+                .iter()
+                .find(|(id, _)| Some(*id) == self.move_target)
+                .map(|(_, path)| path.as_str())
+                .unwrap_or("Choose destination folder");
+            egui::ComboBox::from_id_source("move-target")
+                .selected_text(label)
+                .show_ui(ui, |ui| {
+                    for (id, path) in &folders {
+                        ui.selectable_value(&mut self.move_target, Some(*id), path);
+                    }
+                });
+            if ui
+                .add_enabled(
+                    self.move_target.is_some() && !self.selected.is_empty(),
+                    egui::Button::new("Move selected"),
+                )
+                .clicked()
+                && self.snapshot("move")
+            {
+                if let Some(target) = self.move_target {
+                    if let Err(e) = self.doc.move_bookmarks(&self.selected, target) {
+                        self.message = e.to_string();
+                    }
+                }
+            }
+        });
         ui.separator();
         let rows = self.visible();
         let ids: Vec<_> = rows.iter().map(|b| b.id).collect();
@@ -334,21 +471,63 @@ impl Studio {
             });
             return;
         }
-        egui::ScrollArea::both()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui::Grid::new("bookmark-grid")
-                    .striped(true)
-                    .min_col_width(40.)
-                    .spacing([12., 7.])
-                    .show(ui, |ui| {
-                        for name in ["", "TITLE", "URL", "TAGS", "NOTES", "CATEGORY"] {
-                            ui.label(RichText::new(name).small().color(theme::MUTED));
+        let mut scroll_to = None;
+        if let Some((id, col)) = self.cell_focus {
+            if ui.memory(|m| m.has_focus(egui::Id::new(("cell", id, col)))) {
+                if let Some(row) = ids.iter().position(|i| *i == id) {
+                    let direction = ui.input_mut(|i| {
+                        if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                            Some(Direction::Up)
+                        } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                            || i.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                        {
+                            Some(Direction::Down)
+                        } else if i.consume_key(egui::Modifiers::SHIFT, egui::Key::Tab) {
+                            Some(Direction::Previous)
+                        } else if i.consume_key(egui::Modifiers::NONE, egui::Key::Tab) {
+                            Some(Direction::Next)
+                        } else {
+                            None
                         }
-                        ui.end_row();
-                        for (index, mut b) in rows.into_iter().enumerate() {
-                            let before = b.clone();
-                            let selected = self.selected.contains(&b.id);
+                    });
+                    if let Some(direction) = direction {
+                        if let Some((r, c)) = grid::navigate(row, col, rows.len(), 4, direction) {
+                            self.focus_request = Some((ids[r], c));
+                            scroll_to = Some(r);
+                        }
+                    }
+                }
+            }
+        }
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            use egui_extras::{Column, TableBuilder};
+            let mut table = TableBuilder::new(ui)
+                .striped(true)
+                .resizable(true)
+                .column(Column::exact(45.))
+                .column(Column::initial(190.).at_least(100.))
+                .column(Column::initial(260.).at_least(120.))
+                .column(Column::initial(140.).at_least(80.))
+                .column(Column::initial(180.).at_least(100.))
+                .column(Column::initial(160.).at_least(100.));
+            if let Some(row) = scroll_to {
+                table = table.scroll_to_row(row, Some(egui::Align::Center));
+            }
+            table
+                .header(24., |mut header| {
+                    for label in ["#", "TITLE", "URL", "TAGS", "NOTES", "CATEGORY"] {
+                        header.col(|ui| {
+                            ui.label(RichText::new(label).small().color(theme::MUTED));
+                        });
+                    }
+                })
+                .body(|body| {
+                    body.rows(28., rows.len(), |mut row| {
+                        let index = row.index();
+                        let mut bookmark = rows[index].clone();
+                        let before = bookmark.clone();
+                        row.col(|ui| {
+                            let selected = self.selected.contains(&bookmark.id);
                             if ui
                                 .selectable_label(selected, format!("{:02}", index + 1))
                                 .clicked()
@@ -361,50 +540,65 @@ impl Studio {
                                     );
                                 } else if modifiers.ctrl || modifiers.command {
                                     if selected {
-                                        self.selected.remove(&b.id);
+                                        self.selected.remove(&bookmark.id);
                                     } else {
-                                        self.selected.insert(b.id);
+                                        self.selected.insert(bookmark.id);
                                     }
                                     self.anchor = Some(index);
                                 } else {
                                     self.selected.clear();
-                                    self.selected.insert(b.id);
+                                    self.selected.insert(bookmark.id);
                                     self.anchor = Some(index);
                                 }
                             }
-                            ui.add(egui::TextEdit::singleline(&mut b.title).desired_width(190.));
-                            ui.scope(|ui| {
-                                ui.visuals_mut().override_text_color = Some(theme::ORANGE);
-                                ui.add(egui::TextEdit::singleline(&mut b.url).desired_width(260.));
+                        });
+                        let mut tags = bookmark.tags.join(", ");
+                        for col in 0..4 {
+                            row.col(|ui| {
+                                let value = match col {
+                                    0 => &mut bookmark.title,
+                                    1 => &mut bookmark.url,
+                                    2 => &mut tags,
+                                    _ => &mut bookmark.notes,
+                                };
+                                let response = ui.add(
+                                    egui::TextEdit::singleline(value)
+                                        .id(egui::Id::new(("cell", bookmark.id, col)))
+                                        .desired_width(f32::INFINITY),
+                                );
+                                if self.focus_request == Some((bookmark.id, col)) {
+                                    response.request_focus();
+                                    self.focus_request = None;
+                                }
+                                if response.has_focus() {
+                                    self.cell_focus = Some((bookmark.id, col));
+                                }
                             });
-                            let mut tags = b.tags.join(", ");
-                            if ui
-                                .add(egui::TextEdit::singleline(&mut tags).desired_width(140.))
-                                .changed()
-                            {
-                                b.tags = tags
-                                    .split(',')
-                                    .map(str::trim)
-                                    .filter(|s| !s.is_empty())
-                                    .map(str::to_owned)
-                                    .collect();
-                            }
-                            ui.add(egui::TextEdit::singleline(&mut b.notes).desired_width(180.));
+                        }
+                        if tags != bookmark.tags.join(", ") {
+                            bookmark.tags = tags
+                                .split(',')
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_owned)
+                                .collect();
+                        }
+                        row.col(|ui| {
                             ui.colored_label(
                                 theme::GREEN,
-                                b.category_guess.as_deref().unwrap_or("—"),
+                                bookmark.category_guess.as_deref().unwrap_or("—"),
                             );
-                            ui.end_row();
-                            if b != before {
-                                if let Some(BookmarkNode::Bookmark(target)) =
-                                    self.doc.root_folder.find_mut(b.id)
-                                {
-                                    *target = b;
-                                }
+                        });
+                        if bookmark != before {
+                            if let Some(BookmarkNode::Bookmark(target)) =
+                                self.doc.root_folder.find_mut(bookmark.id)
+                            {
+                                *target = bookmark;
                             }
                         }
                     });
-            });
+                });
+        });
     }
     fn visible(&self) -> Vec<BookmarkItem> {
         fn collect(n: &BookmarkNode, id: Uuid) -> Option<&BookmarkNode> {
@@ -433,41 +627,100 @@ impl Studio {
         items
     }
     fn details(&mut self, ui: &mut egui::Ui) {
-        let Some(id) = self.selected.iter().next().copied() else {
+        let Some(id) = self.selected.iter().min().copied() else {
             ui.label("Select a row in the grid to inspect its details.");
             return;
         };
-        if let Some(BookmarkNode::Bookmark(b)) = self.doc.root_folder.find_mut(id) {
+        let Some(mut bookmark) = self.doc.items().into_iter().find(|b| b.id == id) else {
+            return;
+        };
+        let before = bookmark.clone();
+        egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("Bookmark details");
             ui.label("Title");
-            ui.text_edit_singleline(&mut b.title);
+            ui.text_edit_singleline(&mut bookmark.title);
             ui.label("URL");
-            ui.text_edit_singleline(&mut b.url);
-            if url::Url::parse(&b.url).is_err() {
+            ui.text_edit_singleline(&mut bookmark.url);
+            if url::Url::parse(&bookmark.url).is_err() {
                 ui.colored_label(theme::RED, "This URL is not valid.");
             }
             ui.label("Notes");
             ui.add(
-                egui::TextEdit::multiline(&mut b.notes)
+                egui::TextEdit::multiline(&mut bookmark.notes)
                     .desired_rows(6)
                     .desired_width(f32::INFINITY),
             );
             ui.label("Tags (comma-separated)");
-            let mut tags = b.tags.join(", ");
+            let mut tags = bookmark.tags.join(", ");
             if ui.text_edit_singleline(&mut tags).changed() {
-                b.tags = tags
+                bookmark.tags = tags
                     .split(',')
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                     .map(str::to_owned)
                     .collect();
             }
-            ui.label("Favicon data URI (stored locally; never fetched)");
-            let mut icon = b.favicon_base64.clone().unwrap_or_default();
-            if ui.text_edit_singleline(&mut icon).changed() {
-                b.favicon_base64 = if icon.is_empty() { None } else { Some(icon) };
+            ui.separator();
+            ui.label("Favicon (embedded locally; never fetched)");
+            ui.horizontal(|ui| {
+                if ui.button("Choose image…").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("Images", &["png", "ico", "jpg", "jpeg", "gif"])
+                        .pick_file()
+                    {
+                        let result = (|| -> parser::Result<String> {
+                            if std::fs::metadata(&path)?.len() > 2 * 1024 * 1024 {
+                                return Err("Favicon must be smaller than 2 MiB".into());
+                            }
+                            rustmarks::favicon::from_bytes(&std::fs::read(path)?)
+                        })();
+                        match result {
+                            Ok(uri) => bookmark.favicon_base64 = Some(uri),
+                            Err(e) => self.message = format!("Favicon import failed: {e}"),
+                        }
+                    }
+                }
+                if ui.button("Clear favicon").clicked() {
+                    bookmark.favicon_base64 = None;
+                }
+            });
+            let mut icon = bookmark.favicon_base64.clone().unwrap_or_default();
+            if ui
+                .add(egui::TextEdit::singleline(&mut icon).hint_text("data:image/png;base64,…"))
+                .changed()
+            {
+                bookmark.favicon_base64 = if icon.is_empty() { None } else { Some(icon) };
             }
-            ui.label(format!("Added: {} · ID: {}", b.date_added, b.id));
+            if let Some(uri) = &bookmark.favicon_base64 {
+                if self.icon_texture.as_ref().map(|(key, _)| key) != Some(uri) {
+                    self.icon_texture = None;
+                    match rustmarks::favicon::pixels(uri) {
+                        Ok((w, h, pixels)) => {
+                            let texture = ui.ctx().load_texture(
+                                "bookmark-favicon",
+                                egui::ColorImage::from_rgba_unmultiplied([w, h], &pixels),
+                                egui::TextureOptions::LINEAR,
+                            );
+                            self.icon_texture = Some((uri.clone(), texture));
+                        }
+                        Err(e) => {
+                            ui.colored_label(theme::RED, format!("Cannot preview favicon: {e}"));
+                        }
+                    }
+                }
+                if let Some((_, texture)) = &self.icon_texture {
+                    ui.image((texture.id(), egui::vec2(32., 32.)));
+                }
+            }
+            ui.label(format!(
+                "Added: {} · ID: {}",
+                bookmark.date_added, bookmark.id
+            ));
+        });
+        if bookmark != before {
+            if let Some(BookmarkNode::Bookmark(target)) = self.doc.root_folder.find_mut(id) {
+                *target = bookmark;
+            }
         }
     }
     fn diff(&mut self, ui: &mut egui::Ui) {
@@ -490,26 +743,102 @@ impl Studio {
         if changes.is_empty() {
             ui.label("No changes to review.");
         }
+        let kinds: std::collections::HashMap<_, _> =
+            changes.iter().map(|c| (c.id, c.kind)).collect();
+        fn tree(
+            ui: &mut egui::Ui,
+            node: &BookmarkNode,
+            kinds: &std::collections::HashMap<Uuid, diff_view::Kind>,
+            collapsed: &mut HashSet<Uuid>,
+        ) {
+            let color = match kinds.get(&node.id()) {
+                Some(diff_view::Kind::Added) => theme::GREEN,
+                Some(diff_view::Kind::Removed) => theme::RED,
+                Some(_) => theme::ORANGE,
+                None => theme::MUTED,
+            };
+            match node {
+                BookmarkNode::Folder {
+                    id,
+                    title,
+                    children,
+                    ..
+                } => {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .small_button(if collapsed.contains(id) { "+" } else { "−" })
+                            .clicked()
+                        {
+                            if !collapsed.remove(id) {
+                                collapsed.insert(*id);
+                            }
+                        }
+                        ui.colored_label(color, format!("{title}  ({})", children.len()));
+                    });
+                    if !collapsed.contains(id) {
+                        ui.indent(id, |ui| {
+                            for child in children {
+                                tree(ui, child, kinds, collapsed);
+                            }
+                        });
+                    }
+                }
+                BookmarkNode::Bookmark(b) => {
+                    ui.colored_label(color, format!("• {}", b.title))
+                        .on_hover_text(format!(
+                            "{}\nTags: {}\n{}",
+                            b.url,
+                            b.tags.join(", "),
+                            b.notes
+                        ));
+                }
+            }
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
-            for c in changes {
-                let color = match c.kind {
+            if !self.unified {
+                ui.columns(2, |cols| {
+                    cols[0].heading("Original");
+                    cols[1].heading("Working copy");
+                    cols[0].push_id("before-tree", |ui| {
+                        tree(
+                            ui,
+                            &self.original.root_folder,
+                            &kinds,
+                            &mut self.diff_collapsed,
+                        )
+                    });
+                    cols[1].push_id("after-tree", |ui| {
+                        tree(ui, &self.doc.root_folder, &kinds, &mut self.diff_collapsed)
+                    });
+                });
+                ui.separator();
+                ui.label("Metadata changes — expand to inspect exact before / after values:");
+            }
+            for change in changes {
+                let color = match change.kind {
                     diff_view::Kind::Added => theme::GREEN,
                     diff_view::Kind::Removed => theme::RED,
                     _ => theme::ORANGE,
                 };
-                ui.separator();
-                ui.colored_label(color, format!("{:?}  {}", c.kind, c.title));
                 if self.unified {
-                    if !c.before.is_empty() {
-                        ui.colored_label(theme::RED, format!("− {}", c.before));
+                    ui.separator();
+                    ui.colored_label(color, format!("{:?}  {}", change.kind, change.title));
+                    if !change.before.is_empty() {
+                        ui.colored_label(theme::RED, format!("− {}", change.before));
                     }
-                    if !c.after.is_empty() {
-                        ui.colored_label(theme::GREEN, format!("+ {}", c.after));
+                    if !change.after.is_empty() {
+                        ui.colored_label(theme::GREEN, format!("+ {}", change.after));
                     }
                 } else {
-                    ui.columns(2, |cols| {
-                        cols[0].label(RichText::new(c.before).color(theme::RED));
-                        cols[1].label(RichText::new(c.after).color(theme::GREEN));
+                    egui::CollapsingHeader::new(
+                        RichText::new(format!("{:?}  {}", change.kind, change.title)).color(color),
+                    )
+                    .id_source(("change", change.id))
+                    .show(ui, |ui| {
+                        ui.columns(2, |cols| {
+                            cols[0].label(RichText::new(change.before).color(theme::RED));
+                            cols[1].label(RichText::new(change.after).color(theme::GREEN));
+                        });
                     });
                 }
             }
@@ -521,7 +850,7 @@ impl Studio {
         ui.add_space(12.);
         ui.horizontal(|ui| {
             if ui.button("Scan suggestions").clicked() && self.snapshot("suggest") {
-                heuristics::suggest(&mut self.doc);
+                heuristics::suggest_with(&mut self.doc, &self.rules);
                 self.message = "Suggestions ready. Review below before organizing.".into();
             }
             if ui.button("Accept all → folders").clicked() && self.snapshot("organize") {
@@ -595,7 +924,12 @@ impl Studio {
                 for (i, c) in preview.conflicts.iter().enumerate() {
                     ui.separator();
                     ui.label(RichText::new(&c.incoming.url).color(theme::ORANGE));
-                    if let Some(old) = self.doc.items().into_iter().find(|b| b.id == c.existing) {
+                    if let Some(old) = preview
+                        .document
+                        .items()
+                        .into_iter()
+                        .find(|b| b.id == c.existing)
+                    {
                         ui.label(format!(
                             "Existing: {}\nTags: {}\n{}",
                             old.title,
@@ -670,16 +1004,52 @@ impl Studio {
             ui.label("No snapshots loaded. Refresh to list saved versions.");
         }
         let mut restore = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for s in &self.snapshots {
-                ui.horizontal(|ui| {
-                    if ui.button("Restore").clicked() {
-                        restore = Some(s.clone());
-                    }
-                    ui.label(&s.label);
-                });
+        let mut inspect = None;
+        egui::ScrollArea::vertical()
+            .max_height(300.)
+            .show(ui, |ui| {
+                for s in &self.snapshots {
+                    ui.horizontal(|ui| {
+                        if ui.button("Inspect").clicked() {
+                            inspect = Some(s.clone());
+                        }
+                        if ui.button("Restore").clicked() {
+                            restore = Some(s.clone());
+                        }
+                        ui.label(&s.label);
+                    });
+                }
+            });
+        if let Some(snapshot) = inspect {
+            match self.history.restore(&snapshot) {
+                Ok(doc) => self.inspected_snapshot = Some((snapshot, doc)),
+                Err(e) => self.message = format!("Snapshot inspection failed: {e}"),
             }
-        });
+        }
+        if let Some((snapshot, doc)) = &self.inspected_snapshot {
+            ui.separator();
+            ui.label(format!(
+                "Inspecting {} · {} bookmarks",
+                snapshot.label,
+                doc.items().len()
+            ));
+            ui.label("Differences from this snapshot to your current working copy:");
+            egui::ScrollArea::vertical()
+                .id_source("history-preview")
+                .max_height(250.)
+                .show(ui, |ui| {
+                    for change in diff_view::changes(doc, &self.doc) {
+                        egui::CollapsingHeader::new(format!("{:?}: {}", change.kind, change.title))
+                            .id_source(("history-change", change.id))
+                            .show(ui, |ui| {
+                                ui.columns(2, |columns| {
+                                    columns[0].label(change.before);
+                                    columns[1].label(change.after);
+                                });
+                            });
+                    }
+                });
+        }
         if let Some(s) = restore {
             if self.snapshot("before-restore") {
                 match self.history.restore(&s) {
@@ -719,7 +1089,7 @@ impl Studio {
                 .save_file()
             {
                 match serde_json::to_vec_pretty(&parser::chrome(&self.doc)) {
-                    Ok(data) => match std::fs::write(&path, data) {
+                    Ok(data) => match rustmarks::storage::atomic_write(&path, &data) {
                         Ok(()) => self.message = format!("Exported {}", path.display()),
                         Err(e) => self.message = e.to_string(),
                     },
@@ -727,11 +1097,63 @@ impl Studio {
                 }
             }
         }
+        ui.separator();
+        ui.heading("Local categorization dictionary");
+        ui.label("Earlier rules win equal scores. Domains match exact hosts and subdomains; keywords match whole tokens.");
+        ui.add(
+            egui::TextEdit::multiline(&mut self.rules_text)
+                .code_editor()
+                .desired_rows(14)
+                .desired_width(f32::INFINITY),
+        );
+        ui.horizontal(|ui| {
+            if ui.button("Validate and save rules").clicked() {
+                match RuleSet::parse(&self.rules_text) {
+                    Ok(rules) => {
+                        let path = self
+                            .history
+                            .directory
+                            .parent()
+                            .unwrap_or(&self.history.directory)
+                            .join("rules.json");
+                        let result = (|| -> parser::Result<()> {
+                            std::fs::create_dir_all(path.parent().unwrap())?;
+                            rustmarks::storage::atomic_write(&path, self.rules_text.as_bytes())
+                        })();
+                        match result {
+                            Ok(()) => {
+                                self.rules = rules;
+                                self.message =
+                                    "Rules saved locally. Scan suggestions to apply them.".into();
+                            }
+                            Err(e) => self.message = format!("Rules save failed: {e}"),
+                        }
+                    }
+                    Err(e) => {
+                        self.message = format!("Invalid rules; active dictionary unchanged: {e}")
+                    }
+                }
+            }
+            if ui.button("Load default rules into editor").clicked() {
+                self.rules_text =
+                    serde_json::to_string_pretty(&RuleSet::default()).unwrap_or_default();
+            }
+        });
+        ui.label("Ctrl+Z / Ctrl+Y undo or redo document edits when no text field is focused. Text fields keep their own undo while editing.");
         ui.label("For lossless editing, use RustMarks JSON as your working file and export HTML for your browser.");
     }
 }
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.navigating_history = false;
+        if !ctx.wants_keyboard_input() {
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
+                self.undo_edit();
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
+                self.redo_edit();
+            }
+        }
         if ctx.input(|i| i.viewport().close_requested()) && self.dirty() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm_close = true;
@@ -843,7 +1265,9 @@ impl eframe::App for Studio {
                 View::Organizer => self.organizer(ui),
                 View::Merge => self.merge_panel(ui),
                 View::History => self.history_panel(ui),
-                View::Settings => self.settings(ui),
+                View::Settings => {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
+                }
             });
         if self.confirm_discard {
             egui::Window::new("Discard staged changes?")
@@ -896,6 +1320,76 @@ impl eframe::App for Studio {
                         }
                     });
                 });
+        }
+        if self.doc != self.checkpoint {
+            if !self.navigating_history {
+                let now = std::time::Instant::now();
+                let coalesce = ctx.wants_keyboard_input()
+                    && self
+                        .last_edit
+                        .is_some_and(|t| now.duration_since(t).as_millis() < 500);
+                self.undo.record(
+                    std::mem::replace(&mut self.checkpoint, self.doc.clone()),
+                    coalesce,
+                );
+                self.last_edit = if ctx.wants_keyboard_input() {
+                    Some(now)
+                } else {
+                    None
+                };
+            } else {
+                self.checkpoint = self.doc.clone();
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn workspace_panels_render_without_a_window_or_gpu() {
+        let context = egui::Context::default();
+        crate::vscode_theme::apply(&context);
+        let mut studio = Studio::default();
+        let mut first = None;
+        for index in 0..1000 {
+            let bookmark = BookmarkItem::new(
+                format!("Bookmark {index}"),
+                format!("https://example.com/{index}"),
+            );
+            if first.is_none() {
+                first = Some(bookmark.id);
+            }
+            studio.doc.add(None, BookmarkNode::Bookmark(bookmark));
+        }
+        studio.selected.insert(first.unwrap());
+        studio.original = studio.doc.clone();
+        studio
+            .doc
+            .root_folder
+            .visit_mut(&mut |b| b.notes = "Changed".into());
+        for panel in 0..7 {
+            let _ = context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1400., 900.),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| match panel {
+                        0 => studio.grid(ui),
+                        1 => studio.details(ui),
+                        2 => studio.diff(ui),
+                        3 => studio.organizer(ui),
+                        4 => studio.merge_panel(ui),
+                        5 => studio.history_panel(ui),
+                        _ => studio.settings(ui),
+                    });
+                },
+            );
         }
     }
 }

@@ -122,3 +122,80 @@ impl BookmarkDocument {
         }
     }
 }
+
+impl BookmarkDocument {
+    /// Reject corrupt native trees before traversal or mutation can lose data.
+    pub fn validate(&self) -> crate::parser::Result<()> {
+        if self.version != 1 {
+            return Err("Unsupported RustMarks document version".into());
+        }
+        if !matches!(self.root_folder, BookmarkNode::Folder { .. }) {
+            return Err("Document root must be a folder".into());
+        }
+        let mut ids = std::collections::HashSet::new();
+        let mut pending = vec![(&self.root_folder, 0)];
+        while let Some((node, depth)) = pending.pop() {
+            if depth > 128 {
+                return Err("Folder nesting exceeds 128 levels".into());
+            }
+            if !ids.insert(node.id()) {
+                return Err("Duplicate bookmark or folder IDs".into());
+            }
+            if let BookmarkNode::Folder { children, .. } = node {
+                pending.extend(children.iter().map(|n| (n, depth + 1)));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl BookmarkDocument {
+    pub fn folders(&self) -> Vec<(Uuid, String)> {
+        fn walk(node: &BookmarkNode, prefix: &str, out: &mut Vec<(Uuid, String)>) {
+            if let BookmarkNode::Folder {
+                id,
+                title,
+                children,
+                ..
+            } = node
+            {
+                let path = if prefix.is_empty() {
+                    title.clone()
+                } else {
+                    format!("{prefix}/{title}")
+                };
+                out.push((*id, path.clone()));
+                for child in children {
+                    walk(child, &path, out);
+                }
+            }
+        }
+        let mut out = vec![];
+        walk(&self.root_folder, "", &mut out);
+        out
+    }
+    pub fn move_bookmarks(
+        &mut self,
+        ids: &std::collections::HashSet<Uuid>,
+        folder: Uuid,
+    ) -> crate::parser::Result<()> {
+        if !matches!(
+            self.root_folder.find_mut(folder),
+            Some(BookmarkNode::Folder { .. })
+        ) {
+            return Err("Destination folder no longer exists".into());
+        }
+        let items: Vec<_> = self
+            .items()
+            .into_iter()
+            .filter(|b| ids.contains(&b.id))
+            .collect();
+        // Only remove leaf IDs; accidental folder IDs must not delete entire trees.
+        let leaf_ids = items.iter().map(|b| b.id).collect();
+        self.root_folder.remove(&leaf_ids);
+        for bookmark in items {
+            self.add(Some(folder), BookmarkNode::Bookmark(bookmark));
+        }
+        Ok(())
+    }
+}
