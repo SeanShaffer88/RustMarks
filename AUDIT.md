@@ -1,17 +1,24 @@
 # Audit
 
-Date: 2026-11-07. Scope: build and test verification of `main` at 5d6cad6 plus fixes in this change.
+Date: 2026-11-07. Revision: `main` after PR #11 plus the final-polish change.
 
 | Check | Platform | Result |
 | --- | --- | --- |
-| `cargo fmt --check` | Linux, rustc/cargo 1.97 | Pass |
-| `cargo test --all-targets` | Linux | Pass (22 + 11 + 29 + 7) |
-| `cargo clippy --all-targets` | Linux | Pass, 0 warnings (4 fixed) |
-| `cargo build --release` | Linux | Pass |
-| Windows release build | Windows | Pending: verified by CI on the PR |
-| Native visual review | Windows | Unverified |
+| `cargo fmt --check` | Linux + Windows CI | Pass |
+| `cargo test --all-targets` | Linux + Windows CI | Pass (73 tests) |
+| `cargo clippy --all-targets` | Linux + Windows CI | Pass, 0 warnings |
+| `cargo build --release` | Linux + Windows CI | Pass |
+| MSI build + silent install/uninstall | Windows CI | Pass |
+| Burn Setup.exe build | Windows CI | Pass (built; interactive run not exercised) |
+| Portable mode (`portable.txt`) | Unit-tested resolver only | Partially verified |
+| Native visual review, DPI/theme matrix | Windows desktop | Unverified |
+| Release workflow end-to-end (tag) | GitHub | Unverified: tag push is blocked in the authoring sandbox |
 
-Findings
-- `main` did not compile (E0061 in `ui_components.rs`); fixed.
-- Style-only clippy findings; fixed.
-- Known limitations are listed in README "Remaining verification constraints".
+Findings fixed: `main` did not compile (egui 0.28 API); clippy style findings; lockfile missing; no window-state persistence; missing tooltips; no portable mode or installers.
+
+Known limitations
+- Unsigned binaries (SmartScreen warning); x64 only.
+- Window position is only sanity-checked, not validated against monitors.
+- Uninstall keeps user data under `%APPDATA%\RustMarks`.
+- No network favicon fetching (by design); JSON snapshots with no retention limit; no arbitrary folder drag-and-drop; very large libraries untested for performance.
+- Charter items not met: UI is egui, not pure Win32 (accepted trade-off for this project); idle CPU/memory budgets not measured; no `--headless/--json` CLI.

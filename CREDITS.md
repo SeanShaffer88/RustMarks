@@ -9,3 +9,5 @@ Principal dependencies (see `Cargo.lock` for the full resolved set and each crat
 - serde / serde_json — serialization
 - scraper — Netscape HTML parsing
 - chrono, uuid, url, flate2, base64, image
+
+Packaging: WiX Toolset 5 (MSI and Burn bundle). CI: GitHub Actions, dtolnay/rust-toolchain, Swatinem/rust-cache.

@@ -161,6 +161,7 @@ pub fn navigation(ui: &mut Ui, icon: Icon, text: &str, selected: bool) -> egui::
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 38.), egui::Sense::click());
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, text));
+    let response = response.on_hover_text(format!("Open {text}"));
     if selected || response.hovered() || response.has_focus() {
         ui.painter().rect_filled(
             rect,

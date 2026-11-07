@@ -2,21 +2,26 @@
 
 An offline-first, native **Rust / egui desktop bookmark studio**, designed for Windows with a reference-inspired **charcoal** workspace. No browser runtime, account, telemetry, or backend.
 
-## Run on Windows
+## Install on Windows
+
+Download from the GitHub release page:
+
+- `RustMarks-v<version>-x64-Setup.exe` — per-user installer (no admin rights, offline, no prerequisites).
+- `RustMarks-v<version>-x64.msi` — the same install as an MSI (silent: `msiexec /i RustMarks-v<version>-x64.msi /qn`).
+- `RustMarks-v<version>-x64-Portable.zip` — unzip anywhere; all data stays in `data/` beside the exe (see Portable mode).
+- `RustMarks-v<version>-x64.exe` — bare executable (per-user data).
+- `SHA256SUMS.txt` — checksums for every file. The binaries are not code-signed, so SmartScreen may warn.
+
+## Build from source
 
 Install the stable [Rust toolchain](https://rustup.rs/) and the **Desktop development with C++** workload from Visual Studio Build Tools (including the Windows SDK), then:
 
 ```powershell
 cargo run --release
+cargo build --release   # target/release/rustmarks.exe
 ```
 
-The standalone executable is built at `target/release/rustmarks.exe`:
-
-```powershell
-cargo build --release
-```
-
-The GitHub Actions workflow builds and tests on Windows and uploads the executable as `RustMarks-Windows`. Builds require internet access to download Rust crates; the finished application operates offline.
+Installers are built with `scripts/build-installers.ps1` (WiX 5). CI builds and tests on Windows and runs an install/uninstall smoke test on every packaging change. Building needs internet to fetch crates; the finished application operates offline.
 
 Linux is also supported by eframe/rfd, but requires platform development libraries (on Debian/Ubuntu: `build-essential pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libasound2-dev libudev-dev`) and a graphical session. Linux file dialogs use XDG portals.
 
@@ -110,9 +115,7 @@ Settings provides a JSON dictionary editor with validation and an explicit save 
 
 ### Verification status / release gate
 
-The merged pre-redesign revision (`8598250`) passed Windows CI, including the full test suite, Clippy and a release build: [run 42393028363](https://github.com/SeanShaffer88/RustMarks/actions/runs/42393028363). This is the verified baseline, not evidence that the new charcoal/session code passes.
-
-As of 2026-11-07 on Linux (rustc 1.97): `cargo fmt --check`, `cargo test --all-targets` (69 tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass; `Cargo.lock` is committed. Windows CI for the current revision and native visual review are still pending. See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
+Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (73 tests incl. headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. **Not verified:** native visual review on a real Windows desktop, DPI/theme matrix, portable mode on Windows, README screenshots (none are included rather than faking them). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
 
 ### Remaining verification constraints
 
