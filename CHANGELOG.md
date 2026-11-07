@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 - 2026-11-07
 
 ### Added (release)
 - `release.yml`: pushing a `v*` tag builds on Windows with `--locked`, tests, and publishes `RustMarks-<tag>-x64.zip`, `RustMarks-<tag>-x64.exe` and `SHA256SUMS.txt` to a GitHub release. No installer/MSI yet; the build still stores data under %APPDATA%, so it is not a data-portable build.
