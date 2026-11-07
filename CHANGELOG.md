@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 1.0.0 - 2026-11-07
+
+First stable release. Everything in 0.1.0–0.3.0, plus the installer, portable mode and tooltip work below.
+
 ### Added (tooltips, completed)
 - Tooltips for sidebar navigation, View menu entries and diff tree toggles; every interactive control now has one.
 
