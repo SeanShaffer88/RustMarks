@@ -4,14 +4,44 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceFormat {
+    NativeJson,
+    ChromeJson,
+    NetscapeHtml,
+}
+pub struct LoadedDocument {
+    pub document: BookmarkDocument,
+    pub revision: crate::revision::FileRevision,
+    pub format: SourceFormat,
+}
+pub fn load_tracked(path: &Path) -> Result<LoadedDocument> {
+    let revision = crate::revision::FileRevision::read(path)?;
+    let text = revision.text()?;
+    let format = if text
+        .trim_start_matches('\u{feff}')
+        .trim_start()
+        .starts_with('{')
+    {
+        let value: Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))?;
+        if value.get("root_folder").is_some() {
+            SourceFormat::NativeJson
+        } else {
+            SourceFormat::ChromeJson
+        }
+    } else {
+        SourceFormat::NetscapeHtml
+    };
+    let mut document = parse(text)?;
+    document.source_path = Some(path.display().to_string());
+    Ok(LoadedDocument {
+        document,
+        revision,
+        format,
+    })
+}
 pub fn load(path: &Path) -> Result<BookmarkDocument> {
-    if std::fs::metadata(path)?.len() > 64 * 1024 * 1024 {
-        return Err("Bookmark file exceeds the 64 MiB import limit".into());
-    }
-    let text = std::fs::read_to_string(path)?;
-    let mut doc = parse(&text)?;
-    doc.source_path = Some(path.display().to_string());
-    Ok(doc)
+    Ok(load_tracked(path)?.document)
 }
 pub fn parse(text: &str) -> Result<BookmarkDocument> {
     let text = text.trim_start_matches('\u{feff}');
@@ -263,7 +293,16 @@ pub fn chrome(doc: &BookmarkDocument) -> Value {
     }
     json!({"version":1,"roots":{"bookmark_bar":node(&doc.root_folder)}})
 }
-pub fn save(doc: &BookmarkDocument, path: &Path) -> Result<()> {
+pub fn save_tracked(doc: &BookmarkDocument, path: &Path) -> Result<crate::revision::FileRevision> {
+    save_checked(doc, path, None)
+}
+/// Check the opened revision immediately before publication, including after serialization.
+/// This is optimistic protection, not an OS-level lock against simultaneous writers.
+pub fn save_checked(
+    doc: &BookmarkDocument,
+    path: &Path,
+    expected: Option<&crate::revision::FileRevision>,
+) -> Result<crate::revision::FileRevision> {
     doc.validate()?;
     let data = if path
         .extension()
@@ -274,5 +313,26 @@ pub fn save(doc: &BookmarkDocument, path: &Path) -> Result<()> {
     } else {
         serde_json::to_string_pretty(doc)?
     };
-    crate::storage::atomic_write(path, data.as_bytes())
+    if data.len() > crate::revision::MAX_DOCUMENT_BYTES {
+        return Err(
+            "Serialized document exceeds the 64 MiB limit; split the collection before saving"
+                .into(),
+        );
+    }
+    if let Some(revision) = expected {
+        if revision.refers_to(path) {
+            revision.ensure_unchanged()?;
+        }
+    }
+    // Follow an existing symlink rather than replacing the link itself.
+    let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    crate::storage::atomic_write(&target, data.as_bytes())?;
+    Ok(crate::revision::FileRevision::written(
+        path,
+        data.into_bytes(),
+    ))
+}
+
+pub fn save(doc: &BookmarkDocument, path: &Path) -> Result<()> {
+    save_tracked(doc, path).map(|_| ())
 }
