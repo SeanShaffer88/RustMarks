@@ -21,7 +21,7 @@ enum View {
     History,
     Settings,
 }
-#[derive(PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tab {
     Grid,
     Details,
@@ -123,6 +123,26 @@ impl Default for Studio {
     }
 }
 impl Studio {
+    fn changes_tab_label(&self) -> &'static str {
+        if self.dirty() {
+            "⇄  Changes ●"
+        } else {
+            "⇄  Changes"
+        }
+    }
+    fn editor_tabs(&mut self, ui: &mut egui::Ui) -> [egui::Response; 3] {
+        // Compute document-derived labels before lending `self.tab` to a widget.
+        // Doing both in selectable_value's arguments caused E0502 in Windows CI.
+        let changes_label = self.changes_tab_label();
+        ui.horizontal(|ui| {
+            [
+                ui.selectable_value(&mut self.tab, Tab::Grid, "▤  Bookmarks"),
+                ui.selectable_value(&mut self.tab, Tab::Details, "≡  Details"),
+                ui.selectable_value(&mut self.tab, Tab::Diff, changes_label),
+            ]
+        })
+        .inner
+    }
     fn undo_edit(&mut self) {
         let source_path = self.doc.source_path.clone();
         if self.undo.undo(&mut self.doc) {
@@ -1254,15 +1274,7 @@ impl eframe::App for Studio {
             .frame(egui::Frame::none().fill(theme::EDITOR).inner_margin(16.))
             .show(ctx, |ui| match self.view {
                 View::Explorer => {
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.tab, Tab::Grid, "▤  Bookmarks");
-                        ui.selectable_value(&mut self.tab, Tab::Details, "≡  Details");
-                        ui.selectable_value(
-                            &mut self.tab,
-                            Tab::Diff,
-                            format!("⇄  Changes{}", if self.dirty() { " ●" } else { "" }),
-                        );
-                    });
+                    self.editor_tabs(ui);
                     ui.separator();
                     match self.tab {
                         Tab::Grid => self.grid(ui),
@@ -1355,6 +1367,99 @@ impl eframe::App for Studio {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn render_tabs(
+        context: &egui::Context,
+        studio: &mut Studio,
+        events: Vec<egui::Event>,
+    ) -> [egui::Rect; 3] {
+        let mut rects = [egui::Rect::NOTHING; 3];
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1000., 650.),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    rects = studio.editor_tabs(ui).map(|response| response.rect);
+                });
+            },
+        );
+        rects
+    }
+    #[test]
+    fn changes_tab_marker_tracks_edits_undo_redo_and_save_boundary() {
+        let mut studio = Studio::default();
+        assert_eq!(studio.changes_tab_label(), "⇄  Changes");
+        studio.undo.record(studio.doc.clone(), false);
+        studio.doc.add(
+            None,
+            BookmarkNode::Bookmark(BookmarkItem::new("Example", "https://example.com")),
+        );
+        assert_eq!(studio.changes_tab_label(), "⇄  Changes ●");
+        studio.undo_edit();
+        assert_eq!(studio.changes_tab_label(), "⇄  Changes");
+        studio.redo_edit();
+        assert_eq!(studio.changes_tab_label(), "⇄  Changes ●");
+        // The successful-save boundary updates original without changing the document.
+        studio.original = studio.doc.clone();
+        assert_eq!(studio.changes_tab_label(), "⇄  Changes");
+        studio
+            .doc
+            .root_folder
+            .visit_mut(&mut |bookmark| bookmark.notes = "Changed".into());
+        assert_eq!(studio.changes_tab_label(), "⇄  Changes ●");
+        studio.doc = studio.original.clone();
+        assert_eq!(studio.changes_tab_label(), "⇄  Changes");
+    }
+    #[test]
+    fn clean_and_modified_tab_bars_render_and_accept_pointer_selection() {
+        for modified in [false, true] {
+            let context = egui::Context::default();
+            crate::vscode_theme::apply(&context);
+            let mut studio = Studio::default();
+            if modified {
+                studio.doc.add(
+                    None,
+                    BookmarkNode::Bookmark(BookmarkItem::new("Example", "https://example.com")),
+                );
+            }
+            let mut rects = render_tabs(&context, &mut studio, vec![]);
+            for (index, expected) in [(1, Tab::Details), (2, Tab::Diff), (0, Tab::Grid)] {
+                let position = rects[index].center();
+                assert!(position.is_finite());
+                assert!(rects[index].width() > 0.);
+                render_tabs(
+                    &context,
+                    &mut studio,
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed: true,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+                rects = render_tabs(
+                    &context,
+                    &mut studio,
+                    vec![egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                );
+                assert_eq!(studio.tab, expected);
+                assert_eq!(studio.dirty(), modified);
+            }
+        }
+    }
     #[test]
     fn workspace_panels_render_without_a_window_or_gpu() {
         let context = egui::Context::default();
@@ -1387,14 +1492,18 @@ mod tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| match panel {
-                        0 => studio.grid(ui),
-                        1 => studio.details(ui),
-                        2 => studio.diff(ui),
-                        3 => studio.organizer(ui),
-                        4 => studio.merge_panel(ui),
-                        5 => studio.history_panel(ui),
-                        _ => studio.settings(ui),
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        studio.editor_tabs(ui);
+                        ui.separator();
+                        match panel {
+                            0 => studio.grid(ui),
+                            1 => studio.details(ui),
+                            2 => studio.diff(ui),
+                            3 => studio.organizer(ui),
+                            4 => studio.merge_panel(ui),
+                            5 => studio.history_panel(ui),
+                            _ => studio.settings(ui),
+                        }
                     });
                 },
             );

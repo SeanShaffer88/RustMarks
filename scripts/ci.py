@@ -3,7 +3,7 @@
 
 Usage: python scripts/ci.py test cargo test --all-targets
 No shell is used. Full output goes to artifacts/<gate>.log and the console;
-failed gates emit a bounded tail as a GitHub check annotation and step summary.
+failed gates retain compiler/test error context plus a bounded tail in check annotations.
 """
 from __future__ import annotations
 
@@ -26,6 +26,8 @@ def run(gate: str, command: list[str]) -> int:
     directory = Path("artifacts")
     directory.mkdir(exist_ok=True)
     tail: deque[str] = deque(maxlen=100)
+    diagnostics: deque[list[str]] = deque(maxlen=5)
+    context_remaining = 0
     exit_code = 1
     # Cargo color is disabled so control codes cannot hide the diagnostic text.
     env = {**os.environ, "CARGO_TERM_COLOR": "never"}
@@ -47,7 +49,16 @@ def run(gate: str, command: list[str]) -> int:
                         print("[output] " + line, end="", flush=True)
                     else:
                         print(line, end="", flush=True)
-                    tail.append(line.rstrip("\r\n"))
+                    clean_line = line.rstrip("\r\n")
+                    tail.append(clean_line)
+                    # Cargo can continue compiling other targets after its first error.
+                    # Keep error locations even when they fall outside the final tail.
+                    if re.match(r"^(?:error(?:\[[A-Z]\d+\])?:|thread .*panicked at|failures:)", clean_line):
+                        diagnostics.append([clean_line[:2000]])
+                        context_remaining = 12
+                    elif context_remaining:
+                        diagnostics[-1].append(clean_line[:2000])
+                        context_remaining -= 1
                 exit_code = process.wait()
         except OSError as error:
             message = f"Unable to start {command[0]}: {error}"
@@ -60,13 +71,16 @@ def run(gate: str, command: list[str]) -> int:
         exit_code = 1
     status = "passed" if exit_code == 0 else f"failed (exit {exit_code})"
     excerpt = "\n".join(tail)[-12000:]
+    if diagnostics:
+        context = "\n\n".join("\n".join(block)[:2000] for block in diagnostics)[:8000]
+        excerpt = f"Compiler/test diagnostics:\n{context}\n\nLast output lines:\n{excerpt[-4000:]}"
     if exit_code and os.environ.get("GITHUB_ACTIONS") == "true":
-        message = f"{gate} {status}\nLast output lines:\n{excerpt}"
+        message = f"{gate} {status}\nDiagnostics / last output:\n{excerpt}"
         print(f"::error title={gate} failed::{escape_annotation(message)}", flush=True)
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with Path(summary).open("a", encoding="utf-8") as output:
             output.write(f"\n## {gate}: {status}\n")
-            output.write(f"<details><summary>Last output lines</summary><pre>{html.escape(excerpt)}</pre></details>\n")
+            output.write(f"<details><summary>Diagnostics / last output</summary><pre>{html.escape(excerpt)}</pre></details>\n")
             output.write(f"\nFull output: CI diagnostics artifact, `{gate}.log`.\n")
     return exit_code
 

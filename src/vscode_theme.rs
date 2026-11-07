@@ -18,7 +18,7 @@ pub fn apply(ctx: &egui::Context) {
     style.visuals.widgets.inactive.bg_fill = SURFACE;
     style.visuals.widgets.hovered.bg_fill = Color32::from_rgb(42, 45, 46);
     style.visuals.widgets.active.bg_fill = Color32::from_rgb(55, 55, 61);
-    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1., Color32::from_rgb(51, 51, 51));
+    style.visuals.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, Color32::from_rgb(51, 51, 51));
     style.spacing.item_spacing = egui::vec2(8., 8.);
     ctx.set_style(style);
 }

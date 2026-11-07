@@ -59,6 +59,18 @@ class RunnerTests(unittest.TestCase):
         self.assertIn("row-249", annotation)
         self.assertIn("row-0\n", log)
 
+    def test_compiler_error_survives_noisy_output_after_the_diagnostic(self):
+        stdout, log, _ = self.invoke(
+            "import sys; print('error[E0502]: borrow conflict'); "
+            "print('  --> src/editor.rs:1263:56'); "
+            "[print('background build ' + str(i)) for i in range(250)]; sys.exit(101)", 101
+        )
+        annotation = stdout.split("::error title=test failed::", 1)[1]
+        self.assertIn("error[E0502]", annotation)
+        self.assertIn("src/editor.rs:1263:56", annotation)
+        self.assertIn("background build 249", annotation)
+        self.assertIn("error[E0502]", log)
+
     def test_bad_gate_names_cannot_write_outside_artifacts(self):
         with self.assertRaises(ValueError):
             ci.run("../outside", [sys.executable])
