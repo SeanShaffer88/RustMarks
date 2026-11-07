@@ -29,7 +29,7 @@ jobs:
           Compress-Archive -Path dist/$name/* -DestinationPath "dist/$name.zip"
           Copy-Item target/release/rustmarks.exe "dist/RustMarks-$v-x64.exe"
           Set-Location dist
-          $hashLines = Get-ChildItem -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" } | ForEach-Object { $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(); "$h  $($_.Name)" }
+          $hashLines = Get-ChildItem -File | Where-Object { $_.Name -ne "SHA256SUMS.txt" -and $_.Extension -ne ".wixpdb" } | ForEach-Object { $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(); "$h  $($_.Name)" }
           $hashLines | Out-File -Encoding ascii SHA256SUMS.txt
       - name: Publish release
         shell: pwsh
