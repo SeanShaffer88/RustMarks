@@ -6,21 +6,43 @@ Keep follow-up changes uncommitted until the checks below are completed and revi
 
 - [x] Rust syntax and formatting via rustfmt 1.88.
 - [x] Whitespace checks (`git diff --check`).
-- [x] Four real, dependency-free grid-navigation unit tests via `rustc --test src/grid.rs`.
+- [x] Six real, dependency-free grid-navigation unit tests via `rustc --test src/grid.rs`.
 - [x] Seven standalone source-revision tests via `rustc --test src/revision.rs` (Linux; six apply on Windows).
-- [x] Six CI-diagnostic-runner regression tests via `python -m unittest discover -s scripts -p "test_*.py"`.
+- [x] Seven CI-diagnostic-runner regression tests via `python -m unittest discover -s scripts -p "test_*.py"`.
 - [x] Manifest metadata validation (`cargo metadata --no-deps --format-version 1`).
 - [ ] Generate and retain `Cargo.lock` using stable Rust with registry access.
 - [ ] `cargo test --all-targets` (integration tests, grid tests and headless egui panel smoke test).
 - [ ] `cargo clippy --all-targets`; address meaningful warnings.
 - [ ] `cargo build --release` on Windows.
-- [ ] Diagnose the **failed earlier revision's CI run**, not just formatting success.
+- [x] Diagnose the failed Windows CI compilation through its GitHub check annotation (E0502 in the tab bar).
 
 ### Current environment blockers
 
 The sandbox has no preinstalled Rust toolchain. Rustc/rustfmt/cargo 1.88 were provisioned outside the repository from npm's `@rustbin` packages. A full test attempt failed while downloading `https://index.crates.io/config.json` with a TLS connection error; outbound access does not include the crates registry/download hosts. The earlier merged revision's GitHub Windows job failed in `cargo test --all-targets`. GitHub job status/annotations are readable, but the detailed log download redirects to `results-receiver.actions.githubusercontent.com`, outside the sandbox's allowed hosts. Do not interpret these constraints as proof of compilation success.
 
-The current pass retried `cargo test --all-targets`: it failed before compilation fetching the registry configuration for the `base64` dependency with the same TLS error. No integration test result is inferred from standalone tests. The new CI diagnostic runner is designed to publish bounded failure output as check annotations (retrievable through the GitHub API), preserve the gate's actual exit code, and retain full logs / a generated lockfile as artifacts. Its six local regression tests pass; its workflow integration still requires a real CI run after an authorized commit.
+The current pass retried `cargo test --all-targets`: it failed before compilation fetching the registry configuration for the `base64` dependency with the same TLS error. No integration test result is inferred from standalone tests.
+
+### Diagnosed Windows build failure and corrections
+
+The annotation for [Windows run 42391518278](https://github.com/SeanShaffer88/RustMarks/actions/runs/42391518278), check run `128459917946`, contains the actual compiler diagnostic:
+
+```text
+error[E0502]: cannot borrow `*self` as immutable because it is also borrowed as mutable
+  src/editor.rs:1263:56 (merged revision)
+  ui.selectable_value(&mut self.tab, Tab::Diff,
+      format!("⇄  Changes{}", if self.dirty() { " ●" } else { "" }))
+```
+
+The mutable tab borrow and immutable whole-document borrow overlapped in one call. The tab bar now computes its owned/static label before borrowing the active tab, through a shared `editor_tabs` renderer. The same annotation reported a `float_literal_f32_fallback` warning in theme stroke construction; its width now uses an explicit `1.0_f32`.
+
+Two new headless GUI regressions cover dirty-marker transitions through edit/undo/redo/save/revert and real pointer selection of all tabs in clean and modified documents. The existing seven-panel smoke test now renders the real tab bar too, closing the previous test-coverage omission. **These GUI tests require Cargo dependencies and have not run locally.** The reported source error is corrected, but a fresh Windows build is still required before marking the build gate passed.
+
+### Locally reproduced regressions (red → green)
+
+- `navigation_does_not_overflow_when_table_dimensions_are_large`: failed on the previous implementation with `attempt to multiply with overflow`; passes after replacing flattened index multiplication with coordinate-based navigation. An exhaustive small-table reference test also passes.
+- `test_compiler_error_survives_noisy_output_after_the_diagnostic`: failed because a subsequent 250-line build log displaced `error[E0502]` and its source location from the annotation; passes after retaining bounded diagnostic-context blocks separately from the final output tail. Exit codes, escaping, full logs and annotation-injection protections remain covered.
+
+Current standalone results: **6 grid tests + 7 source-revision tests + 7 Python CI-runner tests pass**. Formatting, manifest metadata and whitespace validation pass. The CI diagnostic workflow has now successfully exposed the real compiler error through the GitHub API; this pass's refined diagnostic logic still needs a fresh workflow run. Full integration tests, Clippy and a Windows release build remain unchecked.
 
 No toolchain binaries, build artifacts, temporary test harnesses, or credentials belong in the repository.
 
