@@ -212,3 +212,225 @@ fn compressed_history_roundtrip_and_disk_save() {
     assert_eq!(parser::load(&file).unwrap().items()[0].title, "Test");
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+#[test]
+fn imports_bom_and_legacy_descriptions() {
+    let html="\u{feff}<DL><p><DT><A HREF='https://example.com'>Example</A><DD>A &amp; B <b>description</b>\n<DT><A HREF='https://two.test'>Two</A></DL>";
+    let doc = parser::parse(html).unwrap();
+    assert_eq!(doc.items().len(), 2);
+    assert_eq!(doc.items()[0].notes, "A & B description");
+    let native = format!("\u{feff}{}", serde_json::to_string(&doc).unwrap());
+    assert_eq!(parser::parse(&native).unwrap(), doc);
+}
+#[test]
+fn corrupt_native_documents_are_rejected() {
+    let mut doc = document(&[("Example", "https://example.com")]);
+    let duplicate = doc.items()[0].clone();
+    doc.add(None, BookmarkNode::Bookmark(duplicate));
+    assert!(parser::parse(&serde_json::to_string(&doc).unwrap()).is_err());
+    doc.version = 99;
+    assert!(doc.validate().is_err());
+    doc.version = 1;
+    doc.root_folder =
+        BookmarkNode::Bookmark(BookmarkItem::new("Invalid root", "https://example.com"));
+    assert!(doc.validate().is_err());
+}
+#[test]
+fn import_depth_limits_reject_hostile_html() {
+    let mut html = "<DL>".to_owned();
+    for _ in 0..130 {
+        html.push_str("<DT><H3>Nested</H3><DL>");
+    }
+    html.push_str("<DT><A HREF='https://example.com'>Test</A>");
+    assert!(parser::parse(&html).is_err());
+}
+#[test]
+fn user_rules_validate_and_break_ties_deterministically() {
+    use rustmarks::rules::RuleSet;
+    let rules=RuleSet::parse(r#"{"version":1,"rules":[{"category":"First","domains":["EXAMPLE.COM"],"keywords":[]},{"category":"Second","domains":["example.com"],"keywords":[] }]}"#).unwrap();
+    assert_eq!(
+        rules.classify(&BookmarkItem::new("Example", "https://sub.example.com")),
+        Some("First".into())
+    );
+    assert_eq!(
+        rules.classify(&BookmarkItem::new("Example", "https://notexample.com")),
+        None
+    );
+    assert!(RuleSet::parse(
+        r#"{"version":1,"rules":[{"category":"Bad","domains":["https://example.com"]}]}"#
+    )
+    .is_err());
+    assert!(RuleSet::parse(r#"{"version":2,"rules":[]}"#).is_err());
+    let encoded = serde_json::to_string(&RuleSet::default()).unwrap();
+    assert_eq!(RuleSet::parse(&encoded).unwrap(), RuleSet::default());
+}
+#[test]
+fn session_undo_redo_and_branching() {
+    use rustmarks::undo::UndoHistory;
+    let initial = document(&[("One", "https://one.test")]);
+    let mut doc = initial.clone();
+    let mut undo = UndoHistory::default();
+    undo.record(doc.clone(), false);
+    doc.add(
+        None,
+        BookmarkNode::Bookmark(BookmarkItem::new("Two", "https://two.test")),
+    );
+    let edited = doc.clone();
+    assert!(undo.undo(&mut doc));
+    assert_eq!(doc, initial);
+    assert!(undo.redo(&mut doc));
+    assert_eq!(doc, edited);
+    assert!(undo.undo(&mut doc));
+    undo.record(doc.clone(), false);
+    doc.add(
+        None,
+        BookmarkNode::Bookmark(BookmarkItem::new("Three", "https://three.test")),
+    );
+    assert!(!undo.can_redo());
+}
+#[test]
+fn undo_coalesces_typing_and_bounds_history() {
+    use rustmarks::undo::UndoHistory;
+    let mut doc = document(&[("One", "https://one.test")]);
+    let initial = doc.clone();
+    let mut undo = UndoHistory::default();
+    for i in 0..3 {
+        undo.record(doc.clone(), i > 0);
+        doc.root_folder
+            .visit_mut(&mut |b| b.title = format!("Title {i}"));
+    }
+    assert!(undo.undo(&mut doc));
+    assert_eq!(doc, initial);
+    assert!(!undo.can_undo());
+    for i in 0..75 {
+        undo.record(doc.clone(), false);
+        doc.root_folder.visit_mut(&mut |b| b.notes = i.to_string());
+    }
+    let mut count = 0;
+    while undo.undo(&mut doc) {
+        count += 1;
+    }
+    assert_eq!(count, 50);
+}
+#[test]
+fn diff_catches_moves_between_same_named_folders_and_reordering() {
+    let mut base = BookmarkDocument::default();
+    let mut first = BookmarkNode::folder("Same");
+    let second = BookmarkNode::folder("Same");
+    let bookmark = BookmarkItem::new("Move me", "https://example.com");
+    let id = bookmark.id;
+    first
+        .children_mut()
+        .unwrap()
+        .push(BookmarkNode::Bookmark(bookmark.clone()));
+    let destination = second.id();
+    base.add(None, first);
+    base.add(None, second);
+    let mut edited = base.clone();
+    edited.root_folder.remove(&[id].into_iter().collect());
+    edited.add(Some(destination), BookmarkNode::Bookmark(bookmark));
+    assert!(diff_view::changes(&base, &edited)
+        .iter()
+        .any(|c| c.id == id && c.kind == Kind::Moved));
+    let base = document(&[("One", "https://one.test"), ("Two", "https://two.test")]);
+    let mut edited = base.clone();
+    edited.root_folder.children_mut().unwrap().reverse();
+    assert_eq!(diff_view::changes(&base, &edited).len(), 2);
+    let mut inserted = base.clone();
+    inserted.root_folder.children_mut().unwrap().insert(
+        0,
+        BookmarkNode::Bookmark(BookmarkItem::new("New", "https://new.test")),
+    );
+    assert_eq!(diff_view::changes(&base, &inserted).len(), 1);
+}
+#[test]
+fn favicon_normalization_is_bounded_and_roundtrips() {
+    use rustmarks::favicon;
+    let image = image::RgbaImage::from_pixel(64, 48, image::Rgba([0, 122, 204, 255]));
+    let mut buffer = std::io::Cursor::new(Vec::new());
+    image
+        .write_to(&mut buffer, image::ImageFormat::Png)
+        .unwrap();
+    let uri = favicon::from_bytes(buffer.get_ref()).unwrap();
+    let (w, h, pixels) = favicon::pixels(&uri).unwrap();
+    assert_eq!((w, h), (32, 24));
+    assert_eq!(pixels.len(), w * h * 4);
+    assert!(favicon::from_bytes(&vec![0; 2 * 1024 * 1024 + 1]).is_err());
+    assert!(favicon::pixels("https://example.com/favicon.ico").is_err());
+    assert!(favicon::pixels("data:image/png;base64,bad!").is_err());
+}
+#[test]
+fn atomic_write_failure_does_not_remove_existing_target() {
+    let directory = std::env::temp_dir().join(format!("rustmarks-atomic-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let target = directory.join("destination");
+    std::fs::create_dir(&target).unwrap();
+    let child = target.join("precious.txt");
+    std::fs::write(&child, b"keep me").unwrap();
+    assert!(rustmarks::storage::atomic_write(&target, b"replacement").is_err());
+    assert_eq!(std::fs::read(&child).unwrap(), b"keep me");
+    assert_eq!(std::fs::read_dir(&directory).unwrap().count(), 1);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+#[test]
+fn duplicate_records_inside_one_import_resolve_against_new_identity() {
+    let base = BookmarkDocument::default();
+    let incoming = document(&[
+        ("First", "https://example.com"),
+        ("Second", "https://example.com?utm_source=test"),
+    ]);
+    let mut preview = merge::preview(&base, &incoming);
+    assert_eq!(preview.added, 1);
+    assert_eq!(preview.conflicts.len(), 1);
+    merge::resolve(
+        &mut preview.document,
+        &preview.conflicts[0],
+        Resolution::UseIncoming,
+    );
+    assert_eq!(preview.document.items()[0].title, "Second");
+}
+
+#[test]
+fn moving_bookmarks_preserves_identity_and_rejects_invalid_destinations() {
+    let mut doc = document(&[("One", "https://one.test"), ("Two", "https://two.test")]);
+    let original = doc.items();
+    let folder = BookmarkNode::folder("Destination");
+    let folder_id = folder.id();
+    doc.add(None, folder);
+    let selection = [original[0].id].into_iter().collect();
+    doc.move_bookmarks(&selection, folder_id).unwrap();
+    assert_eq!(doc.items().len(), 2);
+    assert!(doc.items().iter().any(|b| b.id == original[0].id));
+    let before = doc.clone();
+    assert!(doc
+        .move_bookmarks(&selection, uuid::Uuid::new_v4())
+        .is_err());
+    assert_eq!(doc, before);
+    // Including a folder ID in a bulk selection must not delete the folder.
+    doc.move_bookmarks(&[folder_id].into_iter().collect(), doc.root_folder.id())
+        .unwrap();
+    assert!(doc.folders().iter().any(|(id, _)| *id == folder_id));
+}
+#[test]
+fn chrome_export_handles_extreme_native_timestamps_without_overflow() {
+    let mut doc = document(&[("Future", "https://example.com")]);
+    doc.root_folder.visit_mut(&mut |b| b.date_added = i64::MAX);
+    let exported = parser::chrome(&doc);
+    let imported = parser::parse(&exported.to_string()).unwrap();
+    assert_eq!(imported.items()[0].date_added, i64::MAX);
+}
+
+#[test]
+fn favicon_only_changes_have_distinct_review_summaries() {
+    let mut before = document(&[("Icon", "https://example.com")]);
+    before
+        .root_folder
+        .visit_mut(&mut |b| b.favicon_base64 = Some("data:image/png;base64,AA==".into()));
+    let mut after = before.clone();
+    after
+        .root_folder
+        .visit_mut(&mut |b| b.favicon_base64 = Some("data:image/png;base64,BB==".into()));
+    let changes = diff_view::changes(&before, &after);
+    assert_eq!(changes.len(), 1);
+    assert_ne!(changes[0].before, changes[0].after);
+}

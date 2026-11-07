@@ -1,6 +1,11 @@
 pub mod diff_view;
+pub mod favicon;
+pub mod grid;
 pub mod heuristics;
 pub mod history;
 pub mod merge;
 pub mod models;
 pub mod parser;
+pub mod rules;
+pub mod storage;
+pub mod undo;
