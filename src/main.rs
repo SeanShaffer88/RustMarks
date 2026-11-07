@@ -8,6 +8,10 @@ fn main() -> eframe::Result<()> {
         &rustmarks::window_state::WindowState::default_path(),
     );
     let mut viewport = egui::ViewportBuilder::default()
+        .with_icon(
+            eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon-256.png"))
+                .expect("assets/icon-256.png is a valid PNG"),
+        )
         .with_inner_size(state.size)
         .with_min_inner_size(rustmarks::window_state::MIN_SIZE)
         .with_maximized(state.maximized);

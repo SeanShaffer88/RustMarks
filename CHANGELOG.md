@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added (app icon)
+- RustMarks now has its own icon (fanned bookmark stack, red on charcoal): embedded in the executable, shown in the window/taskbar, on the Start-menu shortcut, in Add/Remove Programs, and on Setup.exe. Artwork in `assets/` (`icon.ico`, `icon.png`).
+
 ### Changed (release contents)
 - Releases now publish only `RustMarks-v<ver>-x64-Portable.zip` and `RustMarks-v<ver>-x64-Setup.exe`, plus `SHA256SUMS.txt`. The bare exe and the standalone MSI are no longer release assets (the MSI remains embedded in Setup.exe). The v1.0.0 release was trimmed to match.
 

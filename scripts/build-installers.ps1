@@ -16,6 +16,6 @@ $msi = Join-Path $out "RustMarks-v$Version-x64.msi"
 $setup = Join-Path $out "RustMarks-v$Version-x64-Setup.exe"
 wix build "$root/packaging/rustmarks.wxs" -arch x64 -d "Version=$Version" -d "ExePath=$exe" -d "RepoRoot=$root" -o $msi
 if ($LASTEXITCODE -ne 0) { throw "MSI build failed" }
-wix build "$root/packaging/bundle.wxs" -arch x64 -ext WixToolset.BootstrapperApplications.wixext -d "Version=$Version" -d "MsiPath=$msi" -o $setup
+wix build "$root/packaging/bundle.wxs" -arch x64 -ext WixToolset.BootstrapperApplications.wixext -d "Version=$Version" -d "MsiPath=$msi" -d "RepoRoot=$root" -o $setup
 if ($LASTEXITCODE -ne 0) { throw "Setup build failed" }
 Get-Item $msi, $setup | Format-Table Name, Length
