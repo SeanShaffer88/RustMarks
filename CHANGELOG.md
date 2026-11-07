@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added (portable mode)
+- If `portable.txt` sits next to `rustmarks.exe`, history, rules and window state are stored in an adjacent `data/` folder and nothing is written under %APPDATA%. The release workflow now ships `RustMarks-<tag>-x64-Portable.zip` (with the marker) plus the bare `RustMarks-<tag>-x64.exe` (per-user data). Paths are resolved in one place (`paths.rs`).
+- Limit: the OS file dialogs and a read-only location (e.g. Program Files) are the user's responsibility; failures to write `data/` surface as normal save errors.
+
 ### Added
 - Descriptive tooltips (action + side effects) on buttons, tabs, text fields, combo boxes and the diff toggle. Not yet covered: sidebar navigation items, the `+`/`−` tree toggles, and the generated file-menu entry at `editor.rs` (`ui.button(label)`).
 

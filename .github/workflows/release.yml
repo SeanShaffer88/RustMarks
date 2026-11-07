@@ -19,12 +19,13 @@ jobs:
         shell: pwsh
         run: |
           $v = "${{ github.ref_name }}"
-          $name = "RustMarks-$v-x64"
+          $name = "RustMarks-$v-x64-Portable"
           New-Item -ItemType Directory -Path dist/$name | Out-Null
           Copy-Item target/release/rustmarks.exe dist/$name/
           Copy-Item README.md, LICENSE, CHANGELOG.md, CREDITS.md dist/$name/
+          Set-Content -Path dist/$name/portable.txt -Value "Portable mode: data is stored in the data folder next to rustmarks.exe. Delete this file to use %APPDATA% instead."
           Compress-Archive -Path dist/$name/* -DestinationPath "dist/$name.zip"
-          Copy-Item target/release/rustmarks.exe "dist/$name.exe"
+          Copy-Item target/release/rustmarks.exe "dist/RustMarks-$v-x64.exe"
           Set-Location dist
           Get-ChildItem -File | ForEach-Object { $h = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(); "$h  $($_.Name)" } | Out-File -Encoding ascii SHA256SUMS.txt
       - name: Publish release

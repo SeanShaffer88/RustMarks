@@ -78,15 +78,6 @@ impl WindowState {
 
     /// Same data directory as the history and dictionaries.
     pub fn default_path() -> PathBuf {
-        let base = std::env::var_os("APPDATA")
-            .or_else(|| std::env::var_os("XDG_DATA_HOME"))
-            .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                std::env::var_os("HOME")
-                    .map(PathBuf::from)
-                    .unwrap_or_else(std::env::temp_dir)
-                    .join(".local/share")
-            });
-        base.join("RustMarks/window.json")
+        crate::paths::data_dir().join("window.json")
     }
 }

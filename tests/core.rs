@@ -608,3 +608,17 @@ mod window_state_tests {
         assert_eq!(nan.position, None);
     }
 }
+
+mod paths_tests {
+    use rustmarks::paths::*;
+    #[test]
+    fn marker_selects_adjacent_data_dir_else_user_dir() {
+        let d = std::env::temp_dir().join(format!("rm-paths-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        let user = std::path::PathBuf::from("/u");
+        assert_eq!(resolve(Some(&d), user.clone()), user.join("RustMarks"));
+        assert_eq!(resolve(None, user.clone()), user.join("RustMarks"));
+        std::fs::write(d.join(PORTABLE_MARKER), b"").unwrap();
+        assert_eq!(resolve(Some(&d), user), d.join("data"));
+    }
+}
