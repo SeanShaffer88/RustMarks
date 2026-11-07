@@ -1,0 +1,44 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="RustMarks" Manufacturer="RustMarks contributors" Version="$(Version)"
+           UpgradeCode="6b0f3c1e-5d2a-4e8b-9a47-2c1d7f9e0a53" Scope="perUser" InstallerVersion="500">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of RustMarks is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsDir" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="RustMarks" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuDir" Name="RustMarks" />
+    </StandardDirectory>
+    <Component Id="AppExe" Directory="INSTALLFOLDER">
+      <File Source="$(ExePath)" Name="rustmarks.exe" KeyPath="yes" />
+    </Component>
+    <Component Id="DocReadme" Directory="INSTALLFOLDER">
+      <File Source="$(RepoRoot)\README.md" KeyPath="yes" />
+    </Component>
+    <Component Id="DocLicense" Directory="INSTALLFOLDER">
+      <File Source="$(RepoRoot)\LICENSE" KeyPath="yes" />
+    </Component>
+    <Component Id="DocChangelog" Directory="INSTALLFOLDER">
+      <File Source="$(RepoRoot)\CHANGELOG.md" KeyPath="yes" />
+    </Component>
+    <Component Id="DocCredits" Directory="INSTALLFOLDER">
+      <File Source="$(RepoRoot)\CREDITS.md" KeyPath="yes" />
+    </Component>
+    <Component Id="AppShortcut" Directory="AppMenuDir">
+      <Shortcut Id="StartMenuShortcut" Name="RustMarks" Description="Offline bookmark studio"
+                Target="[INSTALLFOLDER]rustmarks.exe" WorkingDirectory="INSTALLFOLDER" />
+      <RemoveFolder Id="RemoveAppMenuDir" On="uninstall" />
+      <RegistryValue Root="HKCU" Key="Software\RustMarks" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Feature Id="Main" Title="RustMarks" Level="1">
+      <ComponentRef Id="AppExe" />
+      <ComponentRef Id="DocReadme" />
+      <ComponentRef Id="DocLicense" />
+      <ComponentRef Id="DocChangelog" />
+      <ComponentRef Id="DocCredits" />
+      <ComponentRef Id="AppShortcut" />
+    </Feature>
+  </Package>
+</Wix>

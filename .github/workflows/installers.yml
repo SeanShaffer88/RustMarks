@@ -1,0 +1,40 @@
+name: Installers
+on:
+  pull_request:
+    paths: ["packaging/**", "scripts/build-installers.ps1", ".github/workflows/installers.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installers:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --locked --release
+      - name: Build installers
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          ./scripts/build-installers.ps1 -Version $v -OutDir dist
+      - name: Silent install / uninstall smoke test
+        shell: pwsh
+        run: |
+          $msi = (Get-ChildItem dist/*.msi).FullName
+          $p = Start-Process msiexec -ArgumentList "/i `"$msi`" /qn /l*v install.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content install.log -Tail 60; throw "install failed $($p.ExitCode)" }
+          $installed = Join-Path $env:LOCALAPPDATA "Programs/RustMarks/rustmarks.exe"
+          if (-not (Test-Path $installed)) { throw "exe missing after install" }
+          $p = Start-Process msiexec -ArgumentList "/x `"$msi`" /qn /l*v uninstall.log" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { Get-Content uninstall.log -Tail 60; throw "uninstall failed $($p.ExitCode)" }
+          if (Test-Path $installed) { throw "exe still present after uninstall" }
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: RustMarks-Installers
+          path: |
+            dist/*
+            install.log
+            uninstall.log
+          if-no-files-found: ignore

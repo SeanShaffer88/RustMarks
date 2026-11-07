@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added (installers)
+- Per-user MSI (`RustMarks-v<ver>-x64.msi`) and bundled `RustMarks-v<ver>-x64-Setup.exe` (WiX 5, payload embedded, offline). Installs to `%LOCALAPPDATA%\Programs\RustMarks` with a Start-menu shortcut; no admin rights, no runtime prerequisites. The `Installers` workflow builds both and runs a silent install/uninstall smoke test on Windows for every packaging change. Release workflow now publishes them.
+- Not covered: x86 builds, code signing (SmartScreen will warn), uninstall does not remove user data.
+
 ### Added (portable mode)
 - If `portable.txt` sits next to `rustmarks.exe`, history, rules and window state are stored in an adjacent `data/` folder and nothing is written under %APPDATA%. The release workflow now ships `RustMarks-<tag>-x64-Portable.zip` (with the marker) plus the bare `RustMarks-<tag>-x64.exe` (per-user data). Paths are resolved in one place (`paths.rs`).
 - Limit: the OS file dialogs and a read-only location (e.g. Program Files) are the user's responsibility; failures to write `data/` surface as normal save errors.
