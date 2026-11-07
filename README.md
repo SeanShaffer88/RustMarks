@@ -2,6 +2,38 @@
 
 An offline-first, native **Rust / egui desktop bookmark studio**, designed for Windows with a reference-inspired **charcoal** workspace. No browser runtime, account, telemetry, or backend.
 
+## Screenshots
+
+Real captures from a Windows machine running the v1.0.1 portable build with a real 431-bookmark library loaded.
+
+**Library** — folder tree, inline-editable grid, search expressions:
+
+![Library](docs/screenshots/library.png)
+
+**Merge** — duplicate detection and per-conflict resolution before anything is written:
+
+![Merge](docs/screenshots/merge.png)
+
+**Compare** — staged changes, original vs. working copy:
+
+![Compare](docs/screenshots/compare.png)
+
+**Organize** — local, rule-based folder suggestions (no cloud, no tracking):
+
+![Organize](docs/screenshots/organize.png)
+
+**History** — compressed local snapshots you can inspect and restore:
+
+![History](docs/screenshots/history.png)
+
+**Settings & help** — shortcuts, format notes, and the local categorization dictionary editor:
+
+![Settings](docs/screenshots/settings.png)
+
+First launch, before any file is opened:
+
+![Library, empty](docs/screenshots/library-empty.png)
+
 ## Install on Windows
 
 Download from the GitHub release page:
@@ -113,7 +145,7 @@ Settings provides a JSON dictionary editor with validation and an explicit save 
 
 ### Verification status / release gate
 
-Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (73 tests incl. headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. **Not verified:** native visual review on a real Windows desktop, DPI/theme matrix, portable mode on Windows, README screenshots (none are included rather than faking them). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
+Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (73 tests incl. headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. The v1.0.1 portable build also passed a full visual review on a real Windows desktop — every workspace (Library, Merge, Compare, Organize, History, Settings) exercised against a real 431-bookmark file in portable mode; the screenshots above are from that pass. **Not verified:** the DPI/theme matrix and the Setup.exe installer path on a real desktop (CI covers its silent install/uninstall). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
 
 ### Remaining verification constraints
 

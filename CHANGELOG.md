@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added (screenshots)
+- README now includes real screenshots (`docs/screenshots/`): Library (loaded and first-launch), Merge, Compare, Organize, History and Settings, captured on a real Windows machine from the v1.0.1 portable build during its field pass.
+
+### Fixed (settings version)
+- Settings & help showed a hardcoded "RustMarks 0.1.0"; it now reports the actual build version.
+
 ## 1.0.1 - 2026-11-07
 
 ### Added (app icon)
