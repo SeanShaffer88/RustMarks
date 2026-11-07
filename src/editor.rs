@@ -1373,7 +1373,10 @@ impl Studio {
     }
     fn settings(&mut self, ui: &mut egui::Ui) {
         ui.heading("Settings & help");
-        ui.label("RustMarks 0.1.0 · Charcoal · Offline-first");
+        ui.label(format!(
+            "RustMarks {} · Charcoal · Offline-first",
+            env!("CARGO_PKG_VERSION")
+        ));
         ui.separator();
         ui.label("Ctrl+O  Open    Ctrl+S  Save    Ctrl+Shift+S  Save as");
         ui.label("Ctrl-click rows to toggle selection. Shift-click to select a range.");
