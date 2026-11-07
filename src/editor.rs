@@ -63,6 +63,8 @@ pub struct Studio {
     inspected_snapshot: Option<(Snapshot, BookmarkDocument)>,
     imported_browser_json: bool,
     source_revision: Option<rustmarks::revision::FileRevision>,
+    window_saved: Option<rustmarks::window_state::WindowState>,
+    window_pending: Option<(rustmarks::window_state::WindowState, std::time::Instant)>,
 }
 impl Default for Studio {
     fn default() -> Self {
@@ -120,10 +122,62 @@ impl Default for Studio {
             inspected_snapshot: None,
             imported_browser_json: false,
             source_revision: None,
+            window_saved: None,
+            window_pending: None,
         }
     }
 }
 impl Studio {
+    /// Debounced, atomic persistence of window size/position/maximized state.
+    fn persist_window_state(&mut self, ctx: &egui::Context) {
+        use rustmarks::window_state::WindowState;
+        const DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(600);
+        let (inner, outer, maximized, minimized) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.inner_rect, v.outer_rect, v.maximized, v.minimized)
+        });
+        let (Some(inner), false) = (inner, minimized.unwrap_or(false)) else {
+            return;
+        };
+        let maximized = maximized.unwrap_or(false);
+        let prior = self.window_saved.unwrap_or_default();
+        // While maximized keep the restored size/position that was last saved.
+        let current = if maximized {
+            WindowState { maximized, ..prior }
+        } else {
+            WindowState {
+                size: [inner.width(), inner.height()],
+                position: outer.map(|r| [r.min.x, r.min.y]),
+                maximized,
+            }
+            .sanitized()
+        };
+        if self.window_saved.is_none() {
+            self.window_saved = Some(current);
+            return;
+        }
+        if self.window_saved == Some(current) {
+            self.window_pending = None;
+            return;
+        }
+        let since = match self.window_pending {
+            Some((p, t)) if p == current => t,
+            _ => {
+                let now = std::time::Instant::now();
+                self.window_pending = Some((current, now));
+                now
+            }
+        };
+        if since.elapsed() >= DEBOUNCE {
+            if current.save(&WindowState::default_path()).is_ok() {
+                self.window_saved = Some(current);
+            }
+            self.window_pending = None;
+        } else {
+            ctx.request_repaint_after(DEBOUNCE);
+        }
+    }
+
     fn workspace(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("titlebar").show(ctx, |ui| self.toolbar(ui));
         egui::TopBottomPanel::bottom("status")
@@ -1329,6 +1383,7 @@ impl Studio {
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.navigating_history = false;
+        self.persist_window_state(ctx);
         if !ctx.wants_keyboard_input() {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
                 self.undo_edit();

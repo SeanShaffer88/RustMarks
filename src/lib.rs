@@ -12,3 +12,4 @@ pub mod rules;
 pub mod storage;
 pub mod undo;
 pub mod url_cleanup;
+pub mod window_state;
