@@ -1,11 +1,14 @@
-use crate::vscode_theme as theme;
+use crate::{
+    merge_workspace::{Action as MergeAction, MergeWorkspace},
+    ui_components as components, vscode_theme as theme,
+};
 use egui::{Color32, RichText};
 use rustmarks::{
     diff_view,
     grid::{self, Direction},
     heuristics,
     history::{History, Snapshot},
-    merge::{self, Resolution},
+    merge::MergeSession,
     models::*,
     parser,
     rules::RuleSet,
@@ -13,7 +16,7 @@ use rustmarks::{
 };
 use std::{collections::HashSet, path::PathBuf};
 use uuid::Uuid;
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum View {
     Explorer,
     Organizer,
@@ -40,9 +43,8 @@ pub struct Studio {
     message: String,
     history: History,
     snapshots: Vec<Snapshot>,
-    pending_merge: Option<merge::MergePreview>,
-    merge_base: Option<BookmarkDocument>,
-    resolutions: Vec<Resolution>,
+    merge_session: Option<MergeSession>,
+    merge_ui: MergeWorkspace,
     unified: bool,
     confirm_discard: bool,
     pending_open: bool,
@@ -99,9 +101,8 @@ impl Default for Studio {
             message,
             history: History::default(),
             snapshots: vec![],
-            pending_merge: None,
-            merge_base: None,
-            resolutions: vec![],
+            merge_session: None,
+            merge_ui: MergeWorkspace::default(),
             unified: false,
             confirm_discard: false,
             pending_open: false,
@@ -123,6 +124,135 @@ impl Default for Studio {
     }
 }
 impl Studio {
+    fn workspace(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("titlebar").show(ctx, |ui| self.toolbar(ui));
+        egui::TopBottomPanel::bottom("status")
+            .frame(
+                egui::Frame::none()
+                    .fill(theme::DEEP)
+                    .inner_margin(egui::Margin::symmetric(12., 5.)),
+            )
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{}{}",
+                            self.doc.source_path.as_deref().unwrap_or("Untitled"),
+                            if self.dirty() { "  [Modified]" } else { "" }
+                        ))
+                        .color(Color32::WHITE),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} bookmarks  ·  Local rules active  ·  UTF-8",
+                                self.doc.items().len()
+                            ))
+                            .color(Color32::WHITE),
+                        );
+                    });
+                });
+            });
+        egui::TopBottomPanel::bottom("notification").show(ctx, |ui| {
+            ui.label(RichText::new(&self.message).small());
+        });
+        egui::SidePanel::left("activity")
+            .exact_width(174.)
+            .resizable(false)
+            .frame(egui::Frame::none().fill(theme::DEEP).inner_margin(10.0_f32))
+            .show(ctx, |ui| {
+                ui.add_space(10.);
+                ui.horizontal(|ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(27., 27.), egui::Sense::hover());
+                    ui.painter().rect_filled(rect, 6.0_f32, theme::ACCENT);
+                    ui.painter().text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        "R",
+                        egui::FontId::proportional(17.),
+                        Color32::WHITE,
+                    );
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new("RustMarks").strong().size(15.));
+                        ui.label(
+                            RichText::new("BOOKMARK STUDIO")
+                                .size(8.)
+                                .color(theme::MUTED),
+                        );
+                    });
+                });
+                ui.add_space(22.);
+                use components::Icon;
+                for (view, tab, icon, label) in [
+                    (View::Explorer, Tab::Grid, Icon::Library, "Library"),
+                    (View::Merge, Tab::Grid, Icon::Merge, "Merge"),
+                    (View::Explorer, Tab::Diff, Icon::Compare, "Compare"),
+                    (View::Organizer, Tab::Grid, Icon::Organize, "Organize"),
+                    (View::History, Tab::Grid, Icon::History, "History"),
+                    (View::Settings, Tab::Grid, Icon::Settings, "Settings"),
+                ] {
+                    let selected = self.view == view
+                        && (view != View::Explorer
+                            || if tab == Tab::Diff {
+                                self.tab == Tab::Diff
+                            } else {
+                                self.tab != Tab::Diff
+                            });
+                    let response = components::navigation(ui, icon, label, selected);
+                    let keyboard = response.has_focus()
+                        && ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                                || input.consume_key(egui::Modifiers::NONE, egui::Key::Space)
+                        });
+                    if response.clicked() || keyboard {
+                        self.navigate(view, tab);
+                    }
+                    ui.add_space(2.);
+                }
+                ui.add_space(24.);
+                ui.separator();
+                ui.label(
+                    RichText::new("PRIVATE BY DESIGN")
+                        .size(9.)
+                        .color(theme::MUTED),
+                );
+                ui.label(
+                    RichText::new("Your bookmarks stay\non this device.")
+                        .size(11.)
+                        .color(theme::MUTED),
+                );
+            });
+        if self.view == View::Explorer && self.tab != Tab::Diff {
+            egui::SidePanel::left("explorer")
+                .default_width(220.)
+                .width_range(180. ..=400.)
+                .show(ctx, |ui| self.explorer(ui));
+        }
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::none()
+                    .fill(theme::EDITOR)
+                    .inner_margin(24.0_f32),
+            )
+            .show(ctx, |ui| match self.view {
+                View::Explorer => {
+                    self.editor_tabs(ui);
+                    ui.separator();
+                    match self.tab {
+                        Tab::Grid => self.grid(ui),
+                        Tab::Details => self.details(ui),
+                        Tab::Diff => self.diff(ui),
+                    }
+                }
+                View::Organizer => self.organizer(ui),
+                View::Merge => self.merge_panel(ui),
+                View::History => self.history_panel(ui),
+                View::Settings => {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
+                }
+            });
+    }
     fn changes_tab_label(&self) -> &'static str {
         if self.dirty() {
             "⇄  Changes ●"
@@ -194,8 +324,8 @@ impl Studio {
                     self.checkpoint = self.doc.clone();
                     self.last_edit = None;
                     self.cell_focus = None;
-                    self.pending_merge = None;
-                    self.merge_base = None;
+                    self.merge_session = None;
+                    self.merge_ui.reset();
                     self.folder = None;
                     self.selected.clear();
                     self.message = "File opened locally. No data leaves this device.".into();
@@ -255,82 +385,179 @@ impl Studio {
             }
         }
     }
+    fn prepare_merge(&mut self, paths: Vec<PathBuf>) {
+        let inputs: parser::Result<Vec<_>> = paths
+            .into_iter()
+            .map(|path| parser::load(&path).map(|document| (path.display().to_string(), document)))
+            .collect();
+        match inputs.and_then(|inputs| MergeSession::new(&self.doc, inputs)) {
+            Ok(session) => {
+                self.merge_session = Some(session);
+                self.merge_ui.reset();
+                self.view = View::Merge;
+                self.message =
+                    "Preview ready. Choose how to resolve each conflict, then review changes."
+                        .into();
+            }
+            Err(error) => {
+                self.message = format!(
+                    "Merge import failed; library and previous preview are unchanged: {error}"
+                )
+            }
+        }
+    }
     fn begin_merge(&mut self) {
         if let Some(paths) = rfd::FileDialog::new()
             .add_filter("Bookmarks", &["html", "htm", "json"])
             .pick_files()
         {
-            let mut accumulated = self.doc.clone();
-            let mut conflicts = vec![];
-            let mut added = 0;
-            let mut duplicates = 0;
-            for path in paths {
-                match parser::load(&path) {
-                    Ok(incoming) => {
-                        let p = merge::preview(&accumulated, &incoming);
-                        accumulated = p.document;
-                        conflicts.extend(p.conflicts);
-                        added += p.added;
-                        duplicates += p.duplicates;
-                    }
-                    Err(e) => {
-                        self.message = format!("Merge import failed (no changes applied): {e}");
-                        return;
-                    }
+            self.prepare_merge(paths);
+        }
+    }
+    fn refresh_merge(&mut self) {
+        if let Some(session) = &self.merge_session {
+            let paths = session
+                .sources()
+                .iter()
+                .map(|source| PathBuf::from(&source.path))
+                .collect();
+            self.prepare_merge(paths);
+        }
+    }
+    fn stage_merge(&mut self) {
+        let candidate = match self.merge_session.as_ref() {
+            Some(session) => session.apply(&self.doc),
+            None => {
+                self.message = "Choose incoming files to build a preview first.".into();
+                return;
+            }
+        };
+        match candidate {
+            Ok(document) => {
+                if self.snapshot("before-merge") {
+                    self.doc = document;
+                    self.merge_session = None;
+                    self.merge_ui.reset();
+                    self.folder = None;
+                    self.selected.clear();
+                    self.view = View::Explorer;
+                    self.tab = Tab::Diff;
+                    self.message =
+                        "Merge staged. Review the differences, then Save to commit to disk.".into();
                 }
             }
-            self.merge_base = Some(self.doc.clone());
-            self.resolutions = vec![Resolution::Combine; conflicts.len()];
-            self.pending_merge = Some(merge::MergePreview {
-                document: accumulated,
-                conflicts,
-                added,
-                duplicates,
-            });
-            self.view = View::Merge;
+            Err(error) => self.message = format!("Merge not applied: {error}"),
+        }
+    }
+    fn request_open(&mut self) {
+        if self.dirty() {
+            self.pending_open = true;
+            self.confirm_discard = true;
+        } else {
+            self.open();
+        }
+    }
+    fn navigate(&mut self, view: View, tab: Tab) {
+        self.view = view;
+        if view == View::Explorer {
+            self.tab = tab;
+        }
+        if view == View::History {
+            match self.history.list() {
+                Ok(snapshots) => self.snapshots = snapshots,
+                Err(error) => self.message = error.to_string(),
+            }
         }
     }
     fn toolbar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("R").strong().color(theme::ACCENT).size(22.));
-            ui.label(RichText::new("RustMarks").strong());
-            ui.label(RichText::new("BOOKMARK STUDIO").small().color(theme::MUTED));
-            ui.separator();
-            if ui.button("Open…").on_hover_text("Ctrl+O").clicked() {
-                if self.dirty() {
-                    self.pending_open = true;
-                    self.confirm_discard = true;
-                } else {
-                    self.open();
+        egui::menu::bar(ui, |ui| {
+            ui.menu_button("File", |ui| {
+                if ui.button("Open bookmarks…       Ctrl+O").clicked() {
+                    ui.close_menu();
+                    self.request_open();
                 }
-            }
-            if ui
-                .button("Save")
-                .on_hover_text("Ctrl+S — commit staged changes")
-                .clicked()
-            {
-                self.save(false);
-            }
-            if ui.button("Save as…").clicked() {
-                self.save(true);
-            }
-            if ui.button("Merge files…").clicked() {
-                self.begin_merge();
-            }
-            if ui
-                .add_enabled(self.undo.can_undo(), egui::Button::new("Undo"))
-                .clicked()
-            {
-                self.undo_edit();
-            }
-            if ui
-                .add_enabled(self.undo.can_redo(), egui::Button::new("Redo"))
-                .clicked()
-            {
-                self.redo_edit();
-            }
+                if ui.button("Save                         Ctrl+S").clicked() {
+                    ui.close_menu();
+                    self.save(false);
+                }
+                if ui.button("Save as…       Ctrl+Shift+S").clicked() {
+                    ui.close_menu();
+                    self.save(true);
+                }
+                ui.separator();
+                if ui.button("Merge files…").clicked() {
+                    ui.close_menu();
+                    self.begin_merge();
+                }
+            });
+            ui.menu_button("Edit", |ui| {
+                if ui
+                    .add_enabled(
+                        self.undo.can_undo(),
+                        egui::Button::new("Undo document edit"),
+                    )
+                    .clicked()
+                {
+                    self.undo_edit();
+                    ui.close_menu();
+                }
+                if ui
+                    .add_enabled(
+                        self.undo.can_redo(),
+                        egui::Button::new("Redo document edit"),
+                    )
+                    .clicked()
+                {
+                    self.redo_edit();
+                    ui.close_menu();
+                }
+            });
+            ui.menu_button("View", |ui| {
+                for (label, view, tab) in [
+                    ("Library", View::Explorer, Tab::Grid),
+                    ("Merge", View::Merge, Tab::Grid),
+                    ("Compare", View::Explorer, Tab::Diff),
+                    ("Organize", View::Organizer, Tab::Grid),
+                    ("History", View::History, Tab::Grid),
+                    ("Settings", View::Settings, Tab::Grid),
+                ] {
+                    if ui.button(label).clicked() {
+                        self.navigate(view, tab);
+                        ui.close_menu();
+                    }
+                }
+            });
+            ui.menu_button("Tools", |ui| {
+                if ui.button("Scan categorization suggestions").clicked() {
+                    if self.snapshot("suggest") {
+                        heuristics::suggest_with(&mut self.doc, &self.rules);
+                        self.view = View::Organizer;
+                    }
+                    ui.close_menu();
+                }
+            });
+            ui.menu_button("Help", |ui| {
+                if ui.button("Settings & keyboard shortcuts").clicked() {
+                    self.view = View::Settings;
+                    ui.close_menu();
+                }
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(RichText::new("●  OFFLINE").small().color(theme::GREEN));
+                ui.label(
+                    RichText::new("●  Local workspace")
+                        .size(11.)
+                        .color(theme::GREEN),
+                );
+                if ui
+                    .small_button("Save")
+                    .on_hover_text("Commit staged changes · Ctrl+S")
+                    .clicked()
+                {
+                    self.save(false);
+                }
+                if ui.small_button("Open").clicked() {
+                    self.request_open();
+                }
             });
         });
     }
@@ -930,88 +1157,19 @@ impl Studio {
         });
     }
     fn merge_panel(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Merge Studio");
-        ui.label("Combine files, normalize tracking URLs, and resolve metadata conflicts before applying.");
-        if ui.button("Choose bookmark files…").clicked() {
-            self.begin_merge();
-        }
-        let mut apply = false;
-        let mut cancel = false;
-        if let Some(preview) = &self.pending_merge {
-            ui.label(format!(
-                "{} new bookmarks · {} duplicates · {} conflicts",
-                preview.added,
-                preview.duplicates,
-                preview.conflicts.len()
-            ));
-            ui.horizontal(|ui| {
-                apply = ui.button("Apply merge to working copy").clicked();
-                cancel = ui.button("Cancel preview").clicked();
-            });
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for (i, c) in preview.conflicts.iter().enumerate() {
-                    ui.separator();
-                    ui.label(RichText::new(&c.incoming.url).color(theme::ORANGE));
-                    if let Some(old) = preview
-                        .document
-                        .items()
-                        .into_iter()
-                        .find(|b| b.id == c.existing)
-                    {
-                        ui.label(format!(
-                            "Existing: {}\nTags: {}\n{}",
-                            old.title,
-                            old.tags.join(", "),
-                            old.notes
-                        ));
-                    }
-                    ui.label(format!(
-                        "Incoming: {}\nTags: {}\n{}",
-                        c.incoming.title,
-                        c.incoming.tags.join(", "),
-                        c.incoming.notes
-                    ));
-                    ui.horizontal(|ui| {
-                        ui.radio_value(
-                            &mut self.resolutions[i],
-                            Resolution::KeepExisting,
-                            "Keep existing",
-                        );
-                        ui.radio_value(
-                            &mut self.resolutions[i],
-                            Resolution::UseIncoming,
-                            "Use incoming",
-                        );
-                        ui.radio_value(
-                            &mut self.resolutions[i],
-                            Resolution::Combine,
-                            "Combine tags + notes",
-                        );
-                    });
-                }
-            });
-        } else {
-            ui.add_space(24.);
-            ui.label(
-                "No pending merge. Your active document is unchanged until you apply a preview.",
-            );
-        }
-        if cancel {
-            self.pending_merge = None;
-        }
-        if apply && self.merge_base.as_ref() != Some(&self.doc) {
-            self.message = "The working copy changed after this preview. Choose files again to refresh the merge.".into();
-            return;
-        }
-        if apply && self.snapshot("before-merge") {
-            if let Some(mut p) = self.pending_merge.take() {
-                for (c, r) in p.conflicts.iter().zip(&self.resolutions) {
-                    merge::resolve(&mut p.document, c, *r);
-                }
-                self.doc = p.document;
-                self.view = View::Explorer;
-                self.tab = Tab::Diff;
+        match self
+            .merge_ui
+            .show(ui, &self.doc, self.merge_session.as_mut())
+        {
+            MergeAction::None => {}
+            MergeAction::OpenLibrary => self.request_open(),
+            MergeAction::ChooseFiles => self.begin_merge(),
+            MergeAction::Refresh => self.refresh_merge(),
+            MergeAction::Clear => {
+                self.merge_session = None;
+                self.merge_ui.reset();
             }
+            MergeAction::Review => self.stage_merge(),
         }
     }
     fn history_panel(&mut self, ui: &mut egui::Ui) {
@@ -1098,7 +1256,7 @@ impl Studio {
     }
     fn settings(&mut self, ui: &mut egui::Ui) {
         ui.heading("Settings & help");
-        ui.label("RustMarks 0.1.0 · Dark Modern · Offline-first");
+        ui.label("RustMarks 0.1.0 · Charcoal · Offline-first");
         ui.separator();
         ui.label("Ctrl+O  Open    Ctrl+S  Save    Ctrl+Shift+S  Save as");
         ui.label("Ctrl-click rows to toggle selection. Shift-click to select a range.");
@@ -1201,94 +1359,7 @@ impl eframe::App for Studio {
         } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
             self.save(false);
         }
-        egui::TopBottomPanel::top("titlebar").show(ctx, |ui| self.toolbar(ui));
-        egui::TopBottomPanel::bottom("status")
-            .frame(
-                egui::Frame::none()
-                    .fill(theme::ACCENT)
-                    .inner_margin(egui::Margin::symmetric(12., 5.)),
-            )
-            .show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(format!(
-                            "{}{}",
-                            self.doc.source_path.as_deref().unwrap_or("Untitled"),
-                            if self.dirty() { "  [Modified]" } else { "" }
-                        ))
-                        .color(Color32::WHITE),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} bookmarks  ·  Local rules active  ·  UTF-8",
-                                self.doc.items().len()
-                            ))
-                            .color(Color32::WHITE),
-                        );
-                    });
-                });
-            });
-        egui::TopBottomPanel::bottom("notification").show(ctx, |ui| {
-            ui.label(RichText::new(&self.message).small());
-        });
-        egui::SidePanel::left("activity")
-            .exact_width(55.)
-            .resizable(false)
-            .show(ctx, |ui| {
-                for (view, icon, label) in [
-                    (View::Explorer, "▤", "Explorer"),
-                    (View::Organizer, "✧", "Smart Organizer"),
-                    (View::Merge, "⇄", "Merge Studio"),
-                    (View::History, "◷", "Version History"),
-                    (View::Settings, "⚙", "Settings"),
-                ] {
-                    if ui
-                        .add_sized(
-                            [38., 44.],
-                            egui::SelectableLabel::new(
-                                self.view == view,
-                                RichText::new(icon).size(24.),
-                            ),
-                        )
-                        .on_hover_text(label)
-                        .clicked()
-                    {
-                        self.view = view;
-                        if view == View::History {
-                            match self.history.list() {
-                                Ok(s) => self.snapshots = s,
-                                Err(e) => self.message = e.to_string(),
-                            }
-                        }
-                    }
-                }
-            });
-        if self.view == View::Explorer {
-            egui::SidePanel::left("explorer")
-                .default_width(235.)
-                .width_range(180. ..=400.)
-                .show(ctx, |ui| self.explorer(ui));
-        }
-        egui::CentralPanel::default()
-            .frame(egui::Frame::none().fill(theme::EDITOR).inner_margin(16.))
-            .show(ctx, |ui| match self.view {
-                View::Explorer => {
-                    self.editor_tabs(ui);
-                    ui.separator();
-                    match self.tab {
-                        Tab::Grid => self.grid(ui),
-                        Tab::Details => self.details(ui),
-                        Tab::Diff => self.diff(ui),
-                    }
-                }
-                View::Organizer => self.organizer(ui),
-                View::Merge => self.merge_panel(ui),
-                View::History => self.history_panel(ui),
-                View::Settings => {
-                    egui::ScrollArea::vertical().show(ui, |ui| self.settings(ui));
-                }
-            });
+        self.workspace(ctx);
         if self.confirm_discard {
             egui::Window::new("Discard staged changes?")
                 .collapsible(false)
@@ -1459,6 +1530,161 @@ mod tests {
                 assert_eq!(studio.dirty(), modified);
             }
         }
+    }
+    struct TempHistory(PathBuf);
+    impl TempHistory {
+        fn new() -> Self {
+            Self(std::env::temp_dir().join(format!("rustmarks-shell-test-{}", Uuid::new_v4())))
+        }
+    }
+    impl Drop for TempHistory {
+        fn drop(&mut self) {
+            if self.0.is_dir() {
+                let _ = std::fs::remove_dir_all(&self.0);
+            } else {
+                let _ = std::fs::remove_file(&self.0);
+            }
+        }
+    }
+    fn merge_fixture() -> Studio {
+        let mut studio = Studio::default();
+        studio.doc.add(
+            None,
+            BookmarkNode::Bookmark(BookmarkItem::new("Existing", "https://example.com")),
+        );
+        studio.original = studio.doc.clone();
+        studio.checkpoint = studio.doc.clone();
+        let mut incoming = BookmarkDocument::default();
+        incoming.add(
+            None,
+            BookmarkNode::Bookmark(BookmarkItem::new("Incoming", "https://example.com")),
+        );
+        studio.merge_session =
+            Some(MergeSession::new(&studio.doc, vec![("incoming.html".into(), incoming)]).unwrap());
+        studio
+    }
+    #[test]
+    fn the_actual_charcoal_shell_renders_all_views_at_both_supported_sizes() {
+        let context = egui::Context::default();
+        crate::vscode_theme::apply(&context);
+        let mut studio = merge_fixture();
+        let before = studio.doc.clone();
+        for size in [egui::vec2(1000., 650.), egui::vec2(1440., 900.)] {
+            for (view, tab) in [
+                (View::Explorer, Tab::Grid),
+                (View::Explorer, Tab::Details),
+                (View::Explorer, Tab::Diff),
+                (View::Merge, Tab::Grid),
+                (View::Organizer, Tab::Grid),
+                (View::History, Tab::Grid),
+                (View::Settings, Tab::Grid),
+            ] {
+                studio.view = view;
+                studio.tab = tab;
+                let output = context.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ctx| studio.workspace(ctx),
+                );
+                assert!(!output.shapes.is_empty());
+                assert_eq!(studio.doc, before);
+                assert_eq!(
+                    studio.merge_session.as_ref().unwrap().stats().unresolved,
+                    1,
+                    "Rendering must not select default conflict choices"
+                );
+            }
+        }
+    }
+    #[test]
+    fn refresh_failure_preserves_the_library_and_previous_review_choices() {
+        let mut studio = merge_fixture();
+        studio
+            .merge_session
+            .as_mut()
+            .unwrap()
+            .decide_all(rustmarks::merge::Resolution::KeepExisting);
+        let before = studio.doc.clone();
+        let stats = studio.merge_session.as_ref().unwrap().stats();
+        let missing =
+            std::env::temp_dir().join(format!("missing-rustmarks-{}.html", Uuid::new_v4()));
+        studio.prepare_merge(vec![missing]);
+        assert_eq!(studio.doc, before);
+        let session = studio.merge_session.as_ref().unwrap();
+        assert_eq!(session.stats(), stats);
+        assert_eq!(
+            session.decision(0),
+            Some(rustmarks::merge::Resolution::KeepExisting)
+        );
+        assert!(studio.message.contains("unchanged"));
+    }
+    #[test]
+    fn rejected_reviews_never_snapshot_or_mutate_the_library() {
+        let temporary = TempHistory::new();
+        let mut studio = merge_fixture();
+        studio.history.directory = temporary.0.clone();
+        let before = studio.doc.clone();
+        studio.stage_merge();
+        assert_eq!(studio.doc, before);
+        assert!(studio.merge_session.is_some());
+        assert!(!temporary.0.exists());
+        studio
+            .merge_session
+            .as_mut()
+            .unwrap()
+            .decide_all(rustmarks::merge::Resolution::UseIncoming);
+        studio
+            .doc
+            .root_folder
+            .visit_mut(&mut |bookmark| bookmark.notes = "Later edit".into());
+        let later = studio.doc.clone();
+        studio.stage_merge();
+        assert_eq!(studio.doc, later);
+        assert!(!temporary.0.exists());
+    }
+    #[test]
+    fn snapshot_failure_retains_the_ready_review_and_working_document() {
+        let temporary = TempHistory::new();
+        std::fs::write(&temporary.0, b"a file is not a history directory").unwrap();
+        let mut studio = merge_fixture();
+        studio.history.directory = temporary.0.clone();
+        studio
+            .merge_session
+            .as_mut()
+            .unwrap()
+            .decide_all(rustmarks::merge::Resolution::UseIncoming);
+        let before = studio.doc.clone();
+        studio.stage_merge();
+        assert_eq!(studio.doc, before);
+        assert!(studio
+            .merge_session
+            .as_ref()
+            .unwrap()
+            .can_apply(&studio.doc));
+        assert!(studio.message.contains("Snapshot failed"));
+    }
+    #[test]
+    fn a_reviewed_merge_snapshots_before_staging_and_keeps_the_committed_baseline() {
+        let temporary = TempHistory::new();
+        let mut studio = merge_fixture();
+        studio.history.directory = temporary.0.clone();
+        studio
+            .merge_session
+            .as_mut()
+            .unwrap()
+            .decide_all(rustmarks::merge::Resolution::UseIncoming);
+        let before = studio.doc.clone();
+        studio.stage_merge();
+        assert_eq!(studio.doc.items()[0].title, "Incoming");
+        assert_eq!(studio.original, before);
+        assert_eq!(studio.view, View::Explorer);
+        assert_eq!(studio.tab, Tab::Diff);
+        assert!(studio.merge_session.is_none());
+        let snapshots = studio.history.list().unwrap();
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(studio.history.restore(&snapshots[0]).unwrap(), before);
     }
     #[test]
     fn workspace_panels_render_without_a_window_or_gpu() {

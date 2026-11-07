@@ -1,6 +1,6 @@
 # RustMarks
 
-An offline-first, native **Rust / egui desktop bookmark studio**, designed for Windows with a VS Code Dark Modern-inspired workspace. No browser runtime, account, telemetry, or backend.
+An offline-first, native **Rust / egui desktop bookmark studio**, designed for Windows with a reference-inspired **charcoal** workspace. No browser runtime, account, telemetry, or backend.
 
 ## Run on Windows
 
@@ -20,14 +20,32 @@ The GitHub Actions workflow builds and tests on Windows and uploads the executab
 
 Linux is also supported by eframe/rfd, but requires platform development libraries (on Debian/Ubuntu: `build-essential pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libasound2-dev libudev-dev`) and a graphical session. Linux file dialogs use XDG portals.
 
+## Charcoal workspace
+
+The GUI uses neutral charcoal surfaces (`#191919` sidebar, `#1f1f1f` canvas, `#272727` cards), light text, subtle borders and blue primary actions. Labeled navigation opens **Library, Merge, Compare, Organize, History and Settings**. Native File / Edit / View / Tools / Help menus retain file actions and shortcuts; the status bar is charcoal instead of bright blue.
+
+**Merge** follows the supplied reference: two source cards, duplicate-detection metrics, a bounded/virtualized conflict table with per-row dropdowns, preview metrics and **Review Changes**. Counts come from loaded documents, not mock records. File names / URLs truncate with full-value tooltips, and the page scrolls at smaller window sizes.
+
+### Try the merge workflow
+
+1. Open `examples/bookmarks.html` as the library (Source A).
+2. Select **Merge**, then choose `examples/merge-incoming.html` as Source B.
+3. The engine should report 5 existing bookmarks, 4 incoming, 3 duplicates, 2 metadata conflicts, 1 addition and 6 bookmarks in the candidate. These expectations are covered by a fixture regression test; they are not hardcoded in the GUI.
+4. Choose **Keep source A**, **Prefer source B**, or **Combine metadata** for **every** conflict, or explicitly use **Apply to all N conflicts**. Decisions initially remain unselected.
+5. Filtering does not hide unresolved conflicts from the review gate. The remaining-choice count always covers the entire preview.
+6. **Review Changes** becomes available only when all decisions exist and the library still matches the preview. It takes a safety snapshot and stages the candidate in Compare. Save remains an explicit, separate disk operation.
+7. **Refresh** reloads the same incoming paths against the current library and resets decisions. A failed refresh leaves the previous review and library unchanged. **Clear** discards only the preview, not library edits.
+
+Source A's open action honors the unsaved-changes prompt. Multiple incoming files are supported. If the library changes after previewing, the preview is blocked until refreshed; a snapshot failure preserves both the working library and the ready review. Unsupported reference actions such as "keep newest" or "keep both" are deliberately not displayed. Matching metadata uses the engine's existing compared fields: title, tags, notes and favicon.
+
 ## First steps
 
 1. **Open** an exported Netscape bookmark HTML file, Chrome/Edge bookmark JSON, or a RustMarks JSON document. Try `examples/bookmarks.html`.
 2. Expand the **Explorer** and select a folder, or use **All bookmarks**. Search titles, URLs, tags and notes using expressions such as `tag:dev -broken`.
 3. Edit cells directly. Click row numbers to select, Ctrl-click to toggle rows, or Shift-click to select a range. Apply tags, delete selections, or remove tracking parameters in bulk.
 4. Use **Details** for longer notes, URL validation, and local favicon import/preview (PNG, JPEG, ICO or GIF, normalized to a 32px PNG). Folder names can be edited in the sidebar.
-5. Open **Smart Organizer**, scan local suggestions, and accept individually or move all suggestions into category folders.
-6. In **Merge Studio**, choose one or more files. Inspect duplicates and choose existing, incoming, or combined tags/notes per conflict. Apply to the working copy, not directly to disk.
+5. Open **Organize**, scan local suggestions, and accept individually or move all suggestions into category folders.
+6. In **Merge**, choose one or more files. Resolve every conflict explicitly, then use **Review Changes** to stage the candidate, not write directly to disk.
 7. Inspect **Changes** in side-by-side or unified mode, then **Save** to commit. Revert restores the last committed document after taking a safety snapshot.
 8. Use **Version History** to inspect and restore older snapshots into the working copy; review and save to commit the restored state.
 
@@ -56,11 +74,11 @@ The grid virtualizes visible rows and keeps stable cell IDs. The bulk **Move sel
 | `models.rs` | Unified document, folders, bookmarks and tree operations |
 | `parser.rs` | Netscape HTML, Chrome JSON, native JSON and exporters |
 | `heuristics.rs`, `rules.rs` | Weighted, user-editable local domain/token rules and expression filtering |
-| `merge.rs` | URL normalization, staged merge and metadata resolutions |
+| `merge.rs`, `review_state.rs` | URL normalization, validated merge sessions, explicit decisions and stale-review protection |
 | `diff_view.rs` | ID-based additions, removals, metadata edits and folder moves |
 | `history.rs` | Compressed, atomically published JSON snapshots |
 | `editor.rs` | Desktop workspace, inline grid, selection and file workflows |
-| `vscode_theme.rs` | Dark Modern palette and egui styling |
+| `vscode_theme.rs`, `ui_components.rs`, `merge_workspace.rs` | Charcoal styling, shared native components and presentation-only merge UI |
 | `grid.rs`, `undo.rs` | Testable keyboard cell navigation and bounded session undo/redo |
 | `storage.rs`, `revision.rs`, `favicon.rs` | Atomic file publication, exact-byte source-change checks and bounded local image processing |
 | `url_cleanup.rs` | Conservative tracking cleanup that preserves route/query semantics |
@@ -84,13 +102,11 @@ Settings provides a JSON dictionary editor with validation and an explicit save 
 
 ### Verification status / release gate
 
-Local verification for the current pass: `rustfmt --check`, manifest metadata validation and Git whitespace checks pass. All **13 standalone Rust tests** (six grid-navigation and seven source-revision tests) and **seven CI-runner Python tests** pass. New regressions first reproduced grid-index overflow and lost compiler diagnostics, then passed after the fixes. Full `cargo test --all-targets` remains blocked by access to `index.crates.io`; no complete build/test pass is claimed.
+The merged pre-redesign revision (`8598250`) passed Windows CI, including the full test suite, Clippy and a release build: [run 42393028363](https://github.com/SeanShaffer88/RustMarks/actions/runs/42393028363). This is the verified baseline, not evidence that the new charcoal/session code passes.
 
-The latest failed Windows CI annotation identified **E0502 in the editor tab bar**: `self.tab` was mutably borrowed while `self.dirty()` borrowed the whole app. The label is now computed before borrowing the tab, and the reported theme float-type warning is fixed. New headless tests exercise tab selection and clean/modified marker transitions, and the existing panel smoke test now includes the actual tab bar. **The GUI tests and fixed Windows build still require execution with Cargo dependencies.** See [`docs/verification.md`](docs/verification.md) for the diagnostic, regression evidence and remaining gates.
+Current local checks pass: formatting, manifest metadata and whitespace validation, **20 standalone Rust tests** (six grid, seven source-revision and seven review-state tests), and **seven Python CI-runner tests**. Full `cargo test --all-targets` is still blocked before compilation by the sandbox's inability to download dependencies from `index.crates.io`. New merge-session integration tests, fixture counts, headless shell/merge/theme tests and snapshot/refresh regressions are implemented but have not run. Native visual review, full Cargo tests, Clippy and a Windows release build for these changes remain pending. See [`docs/verification.md`](docs/verification.md).
 
-The workflow runs Cargo gates through `scripts/ci.py`, preserving exit status and full logs. Failed gates publish bounded compiler/test error context plus the final output tail as a check annotation and step summary, so later background compilation does not hide the actual failure. Logs and any generated lockfile are retained as artifacts. The wrapper has seven dependency-free regression tests (`python -m unittest discover -s scripts -p "test_*.py"`).
-
-Before the next commit/PR, complete the build/test and native Windows QA gates in [`docs/verification.md`](docs/verification.md). The headless UI smoke test and expanded integration suite are implemented but have not yet run. `Cargo.lock` must be generated and reviewed on a machine with registry access for reproducible application builds.
+The CI diagnostic runner preserves exit status, compiler/test error context and full logs. A generated application lockfile still needs to be retained and reviewed on a machine with registry access. No fresh commit or pull request has been made for this development pass.
 
 ### Remaining verification constraints
 

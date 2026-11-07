@@ -6,6 +6,7 @@ Keep follow-up changes uncommitted until the checks below are completed and revi
 
 - [x] Rust syntax and formatting via rustfmt 1.88.
 - [x] Whitespace checks (`git diff --check`).
+- [x] Seven standalone explicit-review-state tests via `rustc --test src/review_state.rs`.
 - [x] Six real, dependency-free grid-navigation unit tests via `rustc --test src/grid.rs`.
 - [x] Seven standalone source-revision tests via `rustc --test src/revision.rs` (Linux; six apply on Windows).
 - [x] Seven CI-diagnostic-runner regression tests via `python -m unittest discover -s scripts -p "test_*.py"`.
@@ -73,3 +74,22 @@ No toolchain binaries, build artifacts, temporary test harnesses, or credentials
 ## Before handing off for a commit or PR
 
 Document actual command outputs and Windows QA results. Correct the implementation if any test fails. Update this checklist and README verification status only with evidence. User approval to commit or open a PR is still required; work is automatically saved on the active Arena branch.
+
+## Current charcoal workspace and explicit merge-review development
+
+The active branch is `arena/2933474c-rustmarks`. Its checkout contained the merged build fixes but not the earlier uncommitted visual draft. The reference-inspired charcoal workspace has been implemented here, with presentation separated into `ui_components.rs` and `merge_workspace.rs` and a testable, immutable-base merge session in the core library.
+
+### Verified baseline versus current code
+
+The earlier fixes passed Windows CI at `8598250140dd27552c812701db3b5b8706305dce`, [run 42393028363](https://github.com/SeanShaffer88/RustMarks/actions/runs/42393028363), including full tests, Clippy and a release build. This supersedes historical statements above about the old E0502 fix awaiting execution. It does **not** cover the current uncommitted UI/session changes.
+
+- [x] New dependency-free decision-state tests: explicit decisions, clearing a decision, bulk choice, stale protection, invalid indices, no-conflict readiness and hidden-conflict gating.
+- [x] Formatting, manifest metadata, whitespace checks, 20 standalone Rust tests and seven Python CI-runner tests.
+- [ ] Execute seven new `tests/merge_review.rs` integration tests (including real example-file metrics).
+- [ ] Execute new headless tests for the real shell at 1000×650 / 1440×900, filters, empty merge state and theme application.
+- [ ] Execute application regressions for failed refresh retaining choices, unresolved/stale apply not snapshotting, failed snapshot retaining the ready review, and successful staging snapshotting the original library.
+- [ ] Full Cargo tests, Clippy and Windows release build for this revision.
+- [ ] Native visual review: charcoal surfaces, source cards, file-name truncation, menu/sidebar keyboard focus, dropdowns, filter/bulk controls, scrolling, Windows DPI scaling and both supported sizes.
+- [ ] End-to-end Source A open / Source B selection / Refresh / Clear / Review Changes with the two example HTML files. Expected metrics: 5 existing, 4 incoming, 3 duplicates, 2 conflicts, 1 new, 6 candidate bookmarks.
+
+Full Cargo testing was attempted again but failed fetching the registry configuration for `base64` from `index.crates.io` before compilation. Do not equate standalone review-state tests with a full merge-engine or GUI test pass. All new tests requiring Cargo dependencies remain pending. No commit, push or PR was made during this pass.
