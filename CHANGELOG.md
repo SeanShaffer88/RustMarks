@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added (tooltips, completed)
+- Tooltips for sidebar navigation, View menu entries and diff tree toggles; every interactive control now has one.
+
 ### Added (installers)
 - Per-user MSI (`RustMarks-v<ver>-x64.msi`) and bundled `RustMarks-v<ver>-x64-Setup.exe` (WiX 5, payload embedded, offline). Installs to `%LOCALAPPDATA%\Programs\RustMarks` with a Start-menu shortcut; no admin rights, no runtime prerequisites. The `Installers` workflow builds both and runs a silent install/uninstall smoke test on Windows for every packaging change. Release workflow now publishes them.
 - Not covered: x86 builds, code signing (SmartScreen will warn), uninstall does not remove user data.
@@ -11,7 +14,7 @@
 - Limit: the OS file dialogs and a read-only location (e.g. Program Files) are the user's responsibility; failures to write `data/` surface as normal save errors.
 
 ### Added
-- Descriptive tooltips (action + side effects) on buttons, tabs, text fields, combo boxes and the diff toggle. Not yet covered: sidebar navigation items, the `+`/`−` tree toggles, and the generated file-menu entry at `editor.rs` (`ui.button(label)`).
+- Descriptive tooltips (action + side effects) on buttons, tabs, text fields, combo boxes and the diff toggle. 
 
 ## 0.2.0 - 2026-11-07
 

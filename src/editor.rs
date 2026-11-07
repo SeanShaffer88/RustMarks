@@ -580,7 +580,11 @@ impl Studio {
                     ("History", View::History, Tab::Grid),
                     ("Settings", View::Settings, Tab::Grid),
                 ] {
-                    if ui.button(label).clicked() {
+                    if ui
+                        .button(label)
+                        .on_hover_text(format!("Switch to the {label} view"))
+                        .clicked()
+                    {
                         self.navigate(view, tab);
                         ui.close_menu();
                     }
@@ -1126,6 +1130,7 @@ impl Studio {
                     ui.horizontal(|ui| {
                         if ui
                             .small_button(if collapsed.contains(id) { "+" } else { "−" })
+                            .on_hover_text("Expand or collapse this folder in the diff")
                             .clicked()
                             && !collapsed.remove(id)
                         {
