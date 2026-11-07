@@ -104,9 +104,7 @@ Settings provides a JSON dictionary editor with validation and an explicit save 
 
 The merged pre-redesign revision (`8598250`) passed Windows CI, including the full test suite, Clippy and a release build: [run 42393028363](https://github.com/SeanShaffer88/RustMarks/actions/runs/42393028363). This is the verified baseline, not evidence that the new charcoal/session code passes.
 
-Current local checks pass: formatting, manifest metadata and whitespace validation, **20 standalone Rust tests** (six grid, seven source-revision and seven review-state tests), and **seven Python CI-runner tests**. Full `cargo test --all-targets` is still blocked before compilation by the sandbox's inability to download dependencies from `index.crates.io`. New merge-session integration tests, fixture counts, headless shell/merge/theme tests and snapshot/refresh regressions are implemented but have not run. Native visual review, full Cargo tests, Clippy and a Windows release build for these changes remain pending. See [`docs/verification.md`](docs/verification.md).
-
-The CI diagnostic runner preserves exit status, compiler/test error context and full logs. A generated application lockfile still needs to be retained and reviewed on a machine with registry access. No fresh commit or pull request has been made for this development pass.
+As of 2026-11-07 on Linux (rustc 1.97): `cargo fmt --check`, `cargo test --all-targets` (69 tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass; `Cargo.lock` is committed. Windows CI for the current revision and native visual review are still pending. See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
 
 ### Remaining verification constraints
 

@@ -198,11 +198,9 @@ fn parse_html(text: &str) -> Result<BookmarkDocument> {
                     outer = true;
                 }
             }
-            "/dl" => {
-                if stack.len() > 1 {
-                    let n = stack.pop().unwrap();
-                    stack.last_mut().unwrap().children_mut().unwrap().push(n);
-                }
+            "/dl" if stack.len() > 1 => {
+                let n = stack.pop().unwrap();
+                stack.last_mut().unwrap().children_mut().unwrap().push(n);
             }
             _ => {}
         }
