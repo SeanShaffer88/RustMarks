@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod editor;
+mod merge_workspace;
+mod ui_components;
 mod vscode_theme;
 fn main() -> eframe::Result<()> {
     eframe::run_native(

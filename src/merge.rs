@@ -5,12 +5,8 @@ pub struct Conflict {
     pub existing: Uuid,
     pub incoming: BookmarkItem,
 }
-#[derive(Clone, Copy, PartialEq)]
-pub enum Resolution {
-    KeepExisting,
-    UseIncoming,
-    Combine,
-}
+pub use crate::review_state::Resolution;
+use crate::review_state::ReviewState;
 pub struct MergePreview {
     pub document: BookmarkDocument,
     pub conflicts: Vec<Conflict>,
@@ -126,5 +122,131 @@ pub fn resolve(doc: &mut BookmarkDocument, conflict: &Conflict, choice: Resoluti
                 }
             }
         }
+    }
+}
+
+/// File summaries contain real imported counts, never presentation placeholders.
+#[derive(Clone, Debug)]
+pub struct MergeSource {
+    pub path: String,
+    pub bookmark_count: usize,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MergeStats {
+    pub existing: usize,
+    pub incoming: usize,
+    pub total: usize,
+    pub added: usize,
+    pub duplicates: usize,
+    pub conflicts: usize,
+    pub unresolved: usize,
+}
+/// A staged, explicitly reviewed merge. Creating or reviewing it never changes the library.
+pub struct MergeSession {
+    base: BookmarkDocument,
+    sources: Vec<MergeSource>,
+    preview: MergePreview,
+    decisions: ReviewState,
+}
+impl MergeSession {
+    pub fn new(
+        base: &BookmarkDocument,
+        inputs: Vec<(String, BookmarkDocument)>,
+    ) -> crate::parser::Result<Self> {
+        base.validate()?;
+        if inputs.is_empty() {
+            return Err("Choose at least one incoming bookmark file".into());
+        }
+        let mut document = base.clone();
+        let mut sources = vec![];
+        let mut conflicts = vec![];
+        let mut added = 0;
+        let mut duplicates = 0;
+        for (path, incoming) in inputs {
+            incoming.validate()?;
+            sources.push(MergeSource {
+                path,
+                bookmark_count: incoming.items().len(),
+            });
+            let next = preview(&document, &incoming);
+            document = next.document;
+            conflicts.extend(next.conflicts);
+            added += next.added;
+            duplicates += next.duplicates;
+        }
+        let decisions = ReviewState::new(conflicts.len());
+        Ok(Self {
+            base: base.clone(),
+            sources,
+            preview: MergePreview {
+                document,
+                conflicts,
+                added,
+                duplicates,
+            },
+            decisions,
+        })
+    }
+    pub fn sources(&self) -> &[MergeSource] {
+        &self.sources
+    }
+    pub fn preview(&self) -> &MergePreview {
+        &self.preview
+    }
+    pub fn decision(&self, index: usize) -> Option<Resolution> {
+        self.decisions.get(index)
+    }
+    pub fn set_decision(
+        &mut self,
+        index: usize,
+        decision: Option<Resolution>,
+    ) -> crate::parser::Result<()> {
+        self.decisions.set(index, decision)?;
+        Ok(())
+    }
+    pub fn decide_all(&mut self, decision: Resolution) {
+        self.decisions.set_all(decision);
+    }
+    pub fn is_stale(&self, current: &BookmarkDocument) -> bool {
+        current != &self.base
+    }
+    pub fn stats(&self) -> MergeStats {
+        MergeStats {
+            existing: self.base.items().len(),
+            incoming: self
+                .sources
+                .iter()
+                .map(|source| source.bookmark_count)
+                .sum(),
+            total: self.preview.document.items().len(),
+            added: self.preview.added,
+            duplicates: self.preview.duplicates,
+            conflicts: self.preview.conflicts.len(),
+            unresolved: self.decisions.remaining(),
+        }
+    }
+    pub fn can_apply(&self, current: &BookmarkDocument) -> bool {
+        self.decisions.validate(self.is_stale(current)).is_ok()
+    }
+    /// Return a new document only after validating the original and all decisions.
+    /// Snapshots and disk writes remain the caller's responsibility.
+    pub fn apply(&self, current: &BookmarkDocument) -> crate::parser::Result<BookmarkDocument> {
+        self.decisions.validate(self.is_stale(current))?;
+        let mut document = self.preview.document.clone();
+        for (conflict, decision) in self.preview.conflicts.iter().zip(self.decisions.iter()) {
+            if !matches!(
+                document.root_folder.find_mut(conflict.existing),
+                Some(BookmarkNode::Bookmark(_))
+            ) {
+                return Err("A conflict target is missing; refresh the preview".into());
+            }
+            resolve(
+                &mut document,
+                conflict,
+                decision.ok_or("Missing conflict decision")?,
+            );
+        }
+        document.validate()?;
+        Ok(document)
     }
 }
