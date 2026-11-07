@@ -1,5 +1,5 @@
 # Builds RustMarks-v<ver>-x64.msi and RustMarks-v<ver>-x64-Setup.exe (WiX 5, per-user, offline payload).
-# Usage: pwsh scripts/build-installers.ps1 -Version 0.3.0 -OutDir dist
+# Usage: pwsh scripts/build-installers.ps1 -Version 1.0.0 -OutDir dist
 param([Parameter(Mandatory)][string]$Version, [string]$OutDir = "dist")
 $ErrorActionPreference = "Stop"
 $root = (Resolve-Path "$PSScriptRoot/..").Path
