@@ -11,11 +11,15 @@ Keep follow-up changes uncommitted until the checks below are completed and revi
 - [x] Seven standalone source-revision tests via `rustc --test src/revision.rs` (Linux; six apply on Windows).
 - [x] Seven CI-diagnostic-runner regression tests via `python -m unittest discover -s scripts -p "test_*.py"`.
 - [x] Manifest metadata validation (`cargo metadata --no-deps --format-version 1`).
-- [ ] Generate and retain `Cargo.lock` using stable Rust with registry access.
-- [ ] `cargo test --all-targets` (integration tests, grid tests and headless egui panel smoke test).
-- [ ] `cargo clippy --all-targets`; address meaningful warnings.
+- [x] Generate and retain `Cargo.lock` using stable Rust with registry access.
+- [x] `cargo test --all-targets` (69 tests pass on Linux, 2026-11-07; integration tests, grid tests and headless egui panel smoke test).
+- [x] `cargo clippy --all-targets`; 0 warnings on Linux, 2026-11-07.
 - [ ] `cargo build --release` on Windows.
 - [x] Diagnose the failed Windows CI compilation through its GitHub check annotation (E0502 in the tab bar).
+
+### 2026-11-07 update
+
+Registry access worked; the full Linux gate now passes (fmt, 69 tests, clippy, release build) after fixing an egui 0.28 `WidgetInfo::labeled` signature error. Windows CI and visual review remain pending. The "Current environment blockers" below are historical.
 
 ### Current environment blockers
 

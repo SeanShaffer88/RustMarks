@@ -623,11 +623,9 @@ impl Studio {
                 }
             }
         }
-        if ui.button("+ New folder").clicked() {
-            if self.snapshot("new-folder") {
-                self.doc
-                    .add(self.folder, BookmarkNode::folder("New folder"));
-            }
+        if ui.button("+ New folder").clicked() && self.snapshot("new-folder") {
+            self.doc
+                .add(self.folder, BookmarkNode::folder("New folder"));
         }
         ui.label(
             RichText::new("Changes are staged until you save.\nReview them in the Changes tab.")
@@ -1023,10 +1021,9 @@ impl Studio {
                         if ui
                             .small_button(if collapsed.contains(id) { "+" } else { "−" })
                             .clicked()
+                            && !collapsed.remove(id)
                         {
-                            if !collapsed.remove(id) {
-                                collapsed.insert(*id);
-                            }
+                            collapsed.insert(*id);
                         }
                         ui.colored_label(color, format!("{title}  ({})", children.len()));
                     });

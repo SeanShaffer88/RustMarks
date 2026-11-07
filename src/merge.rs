@@ -113,7 +113,7 @@ pub fn resolve(doc: &mut BookmarkDocument, conflict: &Conflict, choice: Resoluti
                         .any(|lines| lines == incoming_lines);
                 if !conflict.incoming.notes.is_empty() && !already_included {
                     if !old.notes.is_empty() {
-                        old.notes.push_str("\n");
+                        old.notes.push('\n');
                     }
                     old.notes.push_str(&conflict.incoming.notes);
                 }
