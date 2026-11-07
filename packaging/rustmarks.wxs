@@ -14,11 +14,17 @@
     <Component Id="AppExe" Directory="INSTALLFOLDER">
       <File Source="$(ExePath)" Name="rustmarks.exe" KeyPath="yes" />
     </Component>
-    <Component Id="AppDocs" Directory="INSTALLFOLDER">
+    <Component Id="DocReadme" Directory="INSTALLFOLDER">
       <File Source="$(RepoRoot)\README.md" KeyPath="yes" />
-      <File Source="$(RepoRoot)\LICENSE" />
-      <File Source="$(RepoRoot)\CHANGELOG.md" />
-      <File Source="$(RepoRoot)\CREDITS.md" />
+    </Component>
+    <Component Id="DocLicense" Directory="INSTALLFOLDER">
+      <File Source="$(RepoRoot)\LICENSE" KeyPath="yes" />
+    </Component>
+    <Component Id="DocChangelog" Directory="INSTALLFOLDER">
+      <File Source="$(RepoRoot)\CHANGELOG.md" KeyPath="yes" />
+    </Component>
+    <Component Id="DocCredits" Directory="INSTALLFOLDER">
+      <File Source="$(RepoRoot)\CREDITS.md" KeyPath="yes" />
     </Component>
     <Component Id="AppShortcut" Directory="AppMenuDir">
       <Shortcut Id="StartMenuShortcut" Name="RustMarks" Description="Offline bookmark studio"
@@ -28,7 +34,10 @@
     </Component>
     <Feature Id="Main" Title="RustMarks" Level="1">
       <ComponentRef Id="AppExe" />
-      <ComponentRef Id="AppDocs" />
+      <ComponentRef Id="DocReadme" />
+      <ComponentRef Id="DocLicense" />
+      <ComponentRef Id="DocChangelog" />
+      <ComponentRef Id="DocCredits" />
       <ComponentRef Id="AppShortcut" />
     </Feature>
   </Package>
