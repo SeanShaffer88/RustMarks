@@ -3,6 +3,8 @@
            UpgradeCode="6b0f3c1e-5d2a-4e8b-9a47-2c1d7f9e0a53" Scope="perUser" InstallerVersion="500">
     <MajorUpgrade DowngradeErrorMessage="A newer version of RustMarks is already installed." />
     <MediaTemplate EmbedCab="yes" />
+    <Icon Id="RustMarksIcon" SourceFile="$(RepoRoot)\assets\icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="RustMarksIcon" />
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="ProgramsDir" Name="Programs">
         <Directory Id="INSTALLFOLDER" Name="RustMarks" />
@@ -28,7 +30,8 @@
     </Component>
     <Component Id="AppShortcut" Directory="AppMenuDir">
       <Shortcut Id="StartMenuShortcut" Name="RustMarks" Description="Offline bookmark studio"
-                Target="[INSTALLFOLDER]rustmarks.exe" WorkingDirectory="INSTALLFOLDER" />
+                Target="[INSTALLFOLDER]rustmarks.exe" WorkingDirectory="INSTALLFOLDER"
+                Icon="RustMarksIcon" />
       <RemoveFolder Id="RemoveAppMenuDir" On="uninstall" />
       <RegistryValue Root="HKCU" Key="Software\RustMarks" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
     </Component>
