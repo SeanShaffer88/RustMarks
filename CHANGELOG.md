@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Added (window state)
+- Main window size, position and maximized state persist to `RustMarks/window.json` (debounced, atomic) and restore on launch. Corrupt/missing files fall back to 1440x900; sizes below the 1000x650 minimum are raised; implausible positions are dropped.
+
 ### Fixed
 - Compile error in `ui_components::navigation`: `WidgetInfo::labeled` takes an `enabled` argument in egui 0.28.
 - Clippy: collapsed nested `if`/`match` in `editor.rs` and `parser.rs`; `push('\n')` in `merge.rs`.

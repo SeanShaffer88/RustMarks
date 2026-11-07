@@ -53,6 +53,10 @@ Source A's open action honors the unsaved-changes prompt. Multiple incoming file
 
 The grid virtualizes visible rows and keeps stable cell IDs. The bulk **Move selected** action preserves bookmark identity and accepts any folder in the tree. Document undo is bounded to 50 checkpoints; rapid typing is grouped, and text fields retain their own undo while focused.
 
+## Window state
+
+Window size, position and maximized state are saved to `%APPDATA%\RustMarks\window.json` (`$XDG_DATA_HOME/RustMarks/window.json` on Linux) and restored on launch. Positions are only sanity-checked (finite, within +/-32000); there is no per-monitor check, so if a monitor is removed the OS decides where an off-screen window lands. Delete the file to reset.
+
 ## Formats & data safety
 
 - **RustMarks JSON** is the lossless working format: stable IDs, tree structure, notes, tags, timestamps, suggestions and favicon data are preserved.

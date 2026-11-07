@@ -555,3 +555,56 @@ fn checked_save_refuses_external_changes_and_allows_a_separate_working_copy() {
     assert!(!path.exists());
     std::fs::remove_dir_all(directory).unwrap();
 }
+
+mod window_state_tests {
+    use rustmarks::window_state::*;
+    fn dir() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("rm-ws-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+    #[test]
+    fn missing_or_corrupt_files_give_defaults() {
+        let d = dir();
+        assert_eq!(
+            WindowState::load(&d.join("none.json")),
+            WindowState::default()
+        );
+        let p = d.join("bad.json");
+        std::fs::write(&p, b"{not json").unwrap();
+        assert_eq!(WindowState::load(&p), WindowState::default());
+        std::fs::write(&p, vec![b' '; 10_000]).unwrap();
+        assert_eq!(WindowState::load(&p), WindowState::default());
+    }
+    #[test]
+    fn roundtrip_persists_size_position_and_maximized() {
+        let d = dir();
+        let p = d.join("sub/window.json");
+        let s = WindowState {
+            size: [1200., 800.],
+            position: Some([-300., 40.]),
+            maximized: true,
+        };
+        s.save(&p).unwrap();
+        assert_eq!(WindowState::load(&p), s);
+    }
+    #[test]
+    fn invalid_values_are_clamped_or_dropped() {
+        let s = WindowState {
+            size: [10., 99999.],
+            position: Some([1.0e9, 0.]),
+            maximized: false,
+        }
+        .sanitized();
+        assert_eq!(s.size, [MIN_SIZE[0], 16384.]);
+        assert_eq!(s.position, None);
+        let nan = WindowState {
+            size: [f32::NAN, 800.],
+            position: Some([f32::INFINITY, 0.]),
+            maximized: false,
+        }
+        .sanitized();
+        assert_eq!(nan.size, DEFAULT_SIZE);
+        assert_eq!(nan.position, None);
+    }
+}
