@@ -45,7 +45,9 @@ The grid virtualizes visible rows and keeps stable cell IDs. The bulk **Move sel
 - Imports are limited to 64 MiB, folder depth to 128 levels, and restored snapshots to 64 MiB decompressed. Native documents require a folder root, a supported version, and unique node IDs. Local image imports have compressed-size, dimension and allocation limits.
 - Closing with unsaved changes prompts to save, discard with a safety snapshot, or cancel.
 - History is local, not encrypted, and has no automatic retention limit. Snapshots include bookmark URLs and notes; manage disk space and permissions accordingly.
-- Merge URL comparison strips fragments and common tracking keys (`utm_*`, `fbclid`, `gclid`, `msclkid`), sorts query parameters, and otherwise preserves meaningful URL distinctions. Original URL text is retained unless you explicitly run URL cleanup. Import folder structure is retained under its source root.
+- Merge comparison removes common tracking keys (`utm_*`, `fbclid`, `gclid`, `msclkid`) from HTTP(S) URLs and canonicalizes their scheme/host through the URL parser. **Fragments, query order, duplicate keys and raw query encoding are retained** to avoid collapsing distinct routes or changing meaningful values. Cleanup leaves non-web/invalid URLs and recognized signed queries (`signature`, `sig`, `X-Amz-Signature`, `X-Goog-Signature`, `oauth_signature`) untouched. Arbitrary application-specific signatures cannot be identified automatically; inspect staged changes before saving. Stored URLs stay verbatim unless you explicitly run URL cleanup.
+- Merge imports retain folder structure, including intentionally empty folders. Combining the same notes/tags repeatedly does not append duplicate complete note lines or tags.
+- Open files are tracked by exact source bytes. Saving back to the opened path checks for external edits, deletion, or a retargeted source symlink and refuses to overwrite a changed source. Reopen or use a distinct **Save as** destination to resolve the conflict. This is an optimistic check immediately before publication, **not an OS-level lock** against a writer racing the final rename. Saving through an existing symlink updates its target without replacing the link. Imported browser JSON protection recognizes canonical path aliases, rather than only comparing path strings.
 
 ## Architecture
 
@@ -60,7 +62,8 @@ The grid virtualizes visible rows and keeps stable cell IDs. The bulk **Move sel
 | `editor.rs` | Desktop workspace, inline grid, selection and file workflows |
 | `vscode_theme.rs` | Dark Modern palette and egui styling |
 | `grid.rs`, `undo.rs` | Testable keyboard cell navigation and bounded session undo/redo |
-| `storage.rs`, `favicon.rs` | Atomic file publication and bounded local image processing |
+| `storage.rs`, `revision.rs`, `favicon.rs` | Atomic file publication, exact-byte source-change checks and bounded local image processing |
+| `url_cleanup.rs` | Conservative tracking cleanup that preserves route/query semantics |
 
 The core library is separate from the native shell for integration testing. The original project specification is in [`docs/blueprint.md`](docs/blueprint.md).
 
@@ -73,7 +76,7 @@ cargo clippy --all-targets
 cargo build --release
 ```
 
-Integration tests cover serialization, HTML escaping/BOM/legacy descriptions, Chrome timestamps including extremes, filtering, domain boundaries, user dictionaries, URL normalization, merge resolutions, organizer identity, same-name-folder moves and sibling reorder diffs, favicon conversion, atomic-write failure cleanup, snapshot restore, and undo/redo. A headless egui smoke test renders all seven panels against a 1,000-bookmark document. Four dependency-free unit tests cover grid navigation.
+Integration tests cover serialization, HTML escaping/BOM/legacy descriptions, Chrome timestamps including extremes, filtering, domain boundaries, user dictionaries, URL normalization, merge resolutions, organizer identity, same-name-folder moves and sibling reorder diffs, favicon conversion, atomic-write failure cleanup, snapshot restore, and undo/redo. A headless egui smoke test renders all seven panels against a 1,000-bookmark document. Four dependency-free unit tests cover grid navigation, and seven standalone source-revision tests cover external edits/deletion, aliases, invalid UTF-8 and size limits (the symlink-retargeting test runs on Unix). Additional integration regressions cover checked save / Save as, signed URL cleanup, distinct fragment routes, repeat merge resolutions and empty folders.
 
 ### Local categorization dictionaries
 
@@ -81,7 +84,9 @@ Settings provides a JSON dictionary editor with validation and an explicit save 
 
 ### Verification status / release gate
 
-No new commit or pull request has been made for the follow-up development. `rustfmt --check`, manifest metadata validation, and Git whitespace checks run locally. All four standalone grid-navigation tests pass. Full `cargo test --all-targets` remains blocked by the sandbox's inability to download dependencies from `index.crates.io`; no full-build or complete-test pass is claimed. The **previous merged revision's Windows CI failed** during its test/build step; detailed logs are hosted on a domain unavailable to this sandbox. This is an unresolved release blocker, not a passing baseline.
+Local verification for the current pass: `rustfmt --check`, manifest metadata validation and Git whitespace checks pass. All **11 standalone Rust tests** (four grid-navigation and seven source-revision tests) and **six CI-runner Python tests** pass. Full `cargo test --all-targets` is still blocked by the sandbox's inability to download dependencies from `index.crates.io`; no full compilation or complete-test pass is claimed. The **merged revisions' Windows CI failed** during their test/build step; detailed logs are hosted on a domain unavailable to this sandbox. This remains an unresolved release blocker, not a passing baseline.
+
+The workflow now runs Cargo gates through `scripts/ci.py`, preserving each command's exit status and saving its full output. A failed gate publishes its last output lines as a GitHub check annotation and step summary; diagnostic logs and any generated lockfile are retained as an artifact even after failure. The wrapper itself has six dependency-free regression tests (`python -m unittest discover -s scripts -p "test_*.py"`). These workflow changes have not been exercised on GitHub yet.
 
 Before the next commit/PR, complete the build/test and native Windows QA gates in [`docs/verification.md`](docs/verification.md). The headless UI smoke test and expanded integration suite are implemented but have not yet run. `Cargo.lock` must be generated and reviewed on a machine with registry access for reproducible application builds.
 

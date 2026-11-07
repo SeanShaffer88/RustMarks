@@ -18,24 +18,11 @@ pub struct MergePreview {
     pub duplicates: usize,
 }
 pub fn normalize(raw: &str) -> String {
-    let Ok(mut u) = url::Url::parse(raw) else {
-        return raw.trim().to_owned();
-    };
-    u.set_fragment(None);
-    let mut pairs: Vec<(String, String)> = u
-        .query_pairs()
-        .filter(|(k, _)| {
-            !k.to_lowercase().starts_with("utm_")
-                && !["fbclid", "gclid", "msclkid"].contains(&k.as_ref())
-        })
-        .map(|(k, v)| (k.into_owned(), v.into_owned()))
-        .collect();
-    pairs.sort();
-    u.set_query(None);
-    if !pairs.is_empty() {
-        u.query_pairs_mut().extend_pairs(pairs);
+    let clean = crate::url_cleanup::clean(raw);
+    match url::Url::parse(&clean) {
+        Ok(url) if matches!(url.scheme(), "http" | "https") => url.to_string(),
+        _ => clean,
     }
-    u.to_string()
 }
 pub fn preview(base: &BookmarkDocument, incoming: &BookmarkDocument) -> MergePreview {
     let mut result = MergePreview {
@@ -84,11 +71,12 @@ pub fn preview(base: &BookmarkDocument, incoming: &BookmarkDocument) -> MergePre
                 date_added,
                 ..
             } => {
+                let originally_empty = children.is_empty();
                 let children: Vec<_> = children
                     .iter()
                     .filter_map(|n| walk(n, index, result))
                     .collect();
-                if children.is_empty() {
+                if children.is_empty() && !originally_empty {
                     None
                 } else {
                     Some(BookmarkNode::Folder {
@@ -121,7 +109,13 @@ pub fn resolve(doc: &mut BookmarkDocument, conflict: &Conflict, choice: Resoluti
                         old.tags.push(tag.clone());
                     }
                 }
-                if !conflict.incoming.notes.is_empty() && old.notes != conflict.incoming.notes {
+                let incoming_lines: Vec<_> = conflict.incoming.notes.lines().collect();
+                let existing_lines: Vec<_> = old.notes.lines().collect();
+                let already_included = !incoming_lines.is_empty()
+                    && existing_lines
+                        .windows(incoming_lines.len())
+                        .any(|lines| lines == incoming_lines);
+                if !conflict.incoming.notes.is_empty() && !already_included {
                     if !old.notes.is_empty() {
                         old.notes.push_str("\n");
                     }

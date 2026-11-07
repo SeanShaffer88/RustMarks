@@ -60,6 +60,7 @@ pub struct Studio {
     move_target: Option<Uuid>,
     inspected_snapshot: Option<(Snapshot, BookmarkDocument)>,
     imported_browser_json: bool,
+    source_revision: Option<rustmarks::revision::FileRevision>,
 }
 impl Default for Studio {
     fn default() -> Self {
@@ -117,6 +118,7 @@ impl Default for Studio {
             move_target: None,
             inspected_snapshot: None,
             imported_browser_json: false,
+            source_revision: None,
         }
     }
 }
@@ -161,17 +163,11 @@ impl Studio {
             .add_filter("Bookmarks", &["html", "htm", "json"])
             .pick_file()
         {
-            match parser::load(&path) {
-                Ok(doc) => {
-                    self.imported_browser_json = std::fs::read_to_string(&path)
-                        .ok()
-                        .and_then(|s| {
-                            serde_json::from_str::<serde_json::Value>(
-                                s.trim_start_matches('\u{feff}'),
-                            )
-                            .ok()
-                        })
-                        .is_some_and(|v| v.get("roots").is_some());
+            match parser::load_tracked(&path) {
+                Ok(loaded) => {
+                    self.imported_browser_json = loaded.format == parser::SourceFormat::ChromeJson;
+                    self.source_revision = Some(loaded.revision);
+                    let doc = loaded.document;
                     self.original = doc.clone();
                     self.doc = doc;
                     self.undo = UndoHistory::default();
@@ -200,10 +196,21 @@ impl Studio {
         };
         if let Some(path) = path {
             if self.imported_browser_json
-                && self.doc.source_path.as_deref() == Some(path.to_string_lossy().as_ref())
+                && self
+                    .source_revision
+                    .as_ref()
+                    .is_some_and(|revision| revision.refers_to(&path))
             {
                 self.message="Choose a new working file to preserve the original Chrome/Edge JSON. Use Settings to export browser JSON.".into();
                 return;
+            }
+            if let Some(revision) = &self.source_revision {
+                if revision.refers_to(&path) {
+                    if let Err(error) = revision.ensure_unchanged() {
+                        self.message = format!("Save cancelled: {error}");
+                        return;
+                    }
+                }
             }
             if !self.snapshot("before-save") {
                 return;
@@ -215,8 +222,9 @@ impl Studio {
             }
             let mut doc = self.doc.clone();
             doc.source_path = Some(path.display().to_string());
-            match parser::save(&doc, &path) {
-                Ok(()) => {
+            match parser::save_checked(&doc, &path, self.source_revision.as_ref()) {
+                Ok(revision) => {
+                    self.source_revision = Some(revision);
                     self.checkpoint.source_path = doc.source_path.clone();
                     self.imported_browser_json = false;
                     self.doc = doc.clone();
@@ -426,7 +434,7 @@ impl Studio {
                 let selected = &self.selected;
                 self.doc.root_folder.visit_mut(&mut |b| {
                     if selected.contains(&b.id) {
-                        b.url = merge::normalize(&b.url)
+                        b.url = rustmarks::url_cleanup::clean(&b.url)
                     }
                 });
             }

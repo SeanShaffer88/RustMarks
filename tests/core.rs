@@ -97,7 +97,7 @@ fn heuristics_use_domain_boundaries_and_support_filter_expressions() {
 fn normalization_keeps_meaningful_query_parameters() {
     assert_eq!(
         merge::normalize("https://EXAMPLE.com:443/a?utm_source=x&b=2&a=1#part"),
-        "https://example.com/a?a=1&b=2"
+        "https://example.com/a?b=2&a=1#part"
     );
     assert_ne!(
         merge::normalize("https://example.com/?id=1"),
@@ -433,4 +433,125 @@ fn favicon_only_changes_have_distinct_review_summaries() {
     let changes = diff_view::changes(&before, &after);
     assert_eq!(changes.len(), 1);
     assert_ne!(changes[0].before, changes[0].after);
+}
+
+#[test]
+fn tracking_cleanup_and_deduplication_preserve_distinct_fragment_routes() {
+    let base = document(&[("Route A", "https://example.com/#/a")]);
+    let incoming = document(&[("Route B", "https://example.com/#/b")]);
+    let preview = merge::preview(&base, &incoming);
+    assert_eq!(preview.added, 1);
+    assert_eq!(preview.duplicates, 0);
+    let url = "https://EXAMPLE.com:443/?b=%20&utm_source=mail&a=1&a=2#/route";
+    assert_eq!(
+        rustmarks::url_cleanup::clean(url),
+        "https://EXAMPLE.com:443/?b=%20&a=1&a=2#/route"
+    );
+}
+#[test]
+fn repeated_merge_combine_does_not_repeat_notes_or_tags() {
+    let mut base = document(&[("Original", "https://example.com")]);
+    base.root_folder
+        .visit_mut(&mut |b| b.notes = "Original notes".into());
+    let mut incoming = document(&[("Incoming", "https://example.com")]);
+    incoming.root_folder.visit_mut(&mut |b| {
+        b.notes = "First line\nSecond line".into();
+        b.tags = vec!["dev".into()];
+    });
+    for _ in 0..3 {
+        let preview = merge::preview(&base, &incoming);
+        base = preview.document;
+        for conflict in preview.conflicts {
+            merge::resolve(&mut base, &conflict, Resolution::Combine);
+        }
+    }
+    assert_eq!(
+        base.items()[0].notes,
+        "Original notes\nFirst line\nSecond line"
+    );
+    assert_eq!(base.items()[0].tags, vec!["dev"]);
+}
+#[test]
+fn merging_preserves_intentionally_empty_folders_but_omits_duplicate_only_wrappers() {
+    let base = document(&[("Existing", "https://example.com")]);
+    let mut incoming = document(&[("Existing", "https://example.com")]);
+    incoming.add(None, BookmarkNode::folder("Empty folder"));
+    let preview = merge::preview(&base, &incoming);
+    assert_eq!(preview.added, 0);
+    assert!(preview
+        .document
+        .folders()
+        .iter()
+        .any(|(_, path)| path.ends_with("/Empty folder")));
+    let identical = document(&[("Existing", "https://example.com")]);
+    let preview = merge::preview(&base, &identical);
+    assert_eq!(preview.document, base);
+}
+#[test]
+fn tracked_save_and_load_capture_the_published_document_format() {
+    let directory =
+        std::env::temp_dir().join(format!("rustmarks-tracked-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let document = document(&[("Example", "https://example.com")]);
+    let path = directory.join("bookmarks.json");
+    let revision = parser::save_tracked(&document, &path).unwrap();
+    revision.ensure_unchanged().unwrap();
+    let loaded = parser::load_tracked(&path).unwrap();
+    assert_eq!(loaded.format, parser::SourceFormat::NativeJson);
+    assert_eq!(loaded.document.items(), document.items());
+    let browser = directory.join("chrome.json");
+    std::fs::write(&browser, parser::chrome(&document).to_string()).unwrap();
+    assert_eq!(
+        parser::load_tracked(&browser).unwrap().format,
+        parser::SourceFormat::ChromeJson
+    );
+    let html = directory.join("bookmarks.html");
+    parser::save(&document, &html).unwrap();
+    assert_eq!(
+        parser::load_tracked(&html).unwrap().format,
+        parser::SourceFormat::NetscapeHtml
+    );
+    std::fs::remove_dir_all(&directory).unwrap();
+}
+#[cfg(unix)]
+#[test]
+fn saving_through_a_symlink_updates_target_without_replacing_link() {
+    let directory =
+        std::env::temp_dir().join(format!("rustmarks-symlink-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let target = directory.join("target.json");
+    let alias = directory.join("alias.json");
+    let mut doc = document(&[("Before", "https://example.com")]);
+    parser::save(&doc, &target).unwrap();
+    std::os::unix::fs::symlink(&target, &alias).unwrap();
+    doc.root_folder.visit_mut(&mut |b| b.title = "After".into());
+    let revision = parser::save_tracked(&doc, &alias).unwrap();
+    assert!(std::fs::symlink_metadata(&alias)
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(parser::load(&target).unwrap().items()[0].title, "After");
+    revision.ensure_unchanged().unwrap();
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn checked_save_refuses_external_changes_and_allows_a_separate_working_copy() {
+    let directory =
+        std::env::temp_dir().join(format!("rustmarks-conflict-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let path = directory.join("source.json");
+    let doc = document(&[("Original", "https://example.com")]);
+    parser::save(&doc, &path).unwrap();
+    let loaded = parser::load_tracked(&path).unwrap();
+    std::fs::write(&path, b"external changes").unwrap();
+    assert!(parser::save_checked(&doc, &path, Some(&loaded.revision)).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"external changes");
+    let other = directory.join("working.json");
+    parser::save_checked(&doc, &other, Some(&loaded.revision)).unwrap();
+    assert_eq!(parser::load(&other).unwrap().items(), doc.items());
+    std::fs::remove_file(&path).unwrap();
+    assert!(parser::save_checked(&doc, &path, Some(&loaded.revision)).is_err());
+    assert!(!path.exists());
+    std::fs::remove_dir_all(directory).unwrap();
 }
