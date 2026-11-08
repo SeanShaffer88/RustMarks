@@ -4,11 +4,11 @@ An offline-first, native **Rust / egui desktop bookmark studio**, designed for W
 
 ## Screenshots
 
-Real captures from a Windows machine running the v1.0.1 portable build with a real 431-bookmark library loaded. They predate the Tessel redesign in v1.0.2 — the layout is unchanged; the colors are now crimson on charcoal. Fresh captures are owed.
+Real captures from a Windows machine running the v1.0.2 portable build — the Tessel design on a real desktop.
 
-**Library** — folder tree, inline-editable grid, search expressions:
+**Library** — folder tree, inline-editable grid, search expressions (first launch, before a file is opened; the grid fills the same canvas):
 
-![Library](docs/screenshots/library.png)
+![Library](docs/screenshots/library-empty.png)
 
 **Merge** — duplicate detection and per-conflict resolution before anything is written:
 
@@ -26,13 +26,9 @@ Real captures from a Windows machine running the v1.0.1 portable build with a re
 
 ![History](docs/screenshots/history.png)
 
-**Settings & help** — shortcuts, format notes, and the local categorization dictionary editor:
+**Settings & help** — appearance (theme, accent, density), shortcuts, format notes, and the local categorization dictionary editor:
 
 ![Settings](docs/screenshots/settings.png)
-
-First launch, before any file is opened:
-
-![Library, empty](docs/screenshots/library-empty.png)
 
 ## Install on Windows
 
@@ -145,7 +141,7 @@ Settings provides a JSON dictionary editor with validation and an explicit save 
 
 ### Verification status / release gate
 
-Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (73 tests incl. headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. The v1.0.1 portable build also passed a full visual review on a real Windows desktop — every workspace (Library, Merge, Compare, Organize, History, Settings) exercised against a real 431-bookmark file in portable mode; the screenshots above are from that pass. **Not verified:** the DPI/theme matrix and the Setup.exe installer path on a real desktop (CI covers its silent install/uninstall). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
+Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (73 tests incl. headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. The v1.0.1 portable build passed a full visual review on a real Windows desktop — every workspace exercised against a real 431-bookmark file in portable mode. The v1.0.2 portable build then passed the same visual review for the Tessel interface — every workspace rendered and exercised on the real desktop in portable mode (Settings confirms the portable snapshot directory and the live version string); the screenshots above are from that pass. **Not verified:** the loaded-library grid at scale in the new theme, the light theme and accent presets on a real desktop, the DPI matrix, and the Setup.exe installer path on a real desktop (CI covers its silent install/uninstall). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
 
 ### Remaining verification constraints
 
