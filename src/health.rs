@@ -373,7 +373,6 @@ mod tests {
         assert_eq!(after.bookmarks, 3);
     }
 
-
     #[test]
     fn derive_title_prefers_a_wordy_segment() {
         assert_eq!(
