@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+- The Library grid and the bookmark counts (explorer and status bar) kept showing the previous document right after opening a file, and after undo/redo: opening and history navigation replace the document and sync the checkpoint themselves, so the revision counter that keys the grid caches never moved. The revision now advances on open, undo, redo and history navigation, with regression tests. Found in the v1.1.0 field pass.
+
+### Changed (screenshots)
+- README screenshots refreshed with real v1.1.0 captures from the field pass (all workspaces, portable mode, real Windows desktop), including the first Health view capture; Merge, Organize, History and Health were exercised against two example bookmark files.
+
 ## 1.1.0 - 2026-11-07
 
 ### Added (watch folder + saved searches)

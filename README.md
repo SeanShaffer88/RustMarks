@@ -4,13 +4,13 @@ An offline-first, native **Rust / egui desktop bookmark studio**, designed for W
 
 ## Screenshots
 
-Real captures from a Windows machine running the v1.0.2 portable build — the Tessel design on a real desktop. (The Health view and the other 1.1.0 additions arrived after these captures.)
+Real captures from a Windows machine running the v1.1.0 portable build — the Tessel design on a real desktop, exercised against two example bookmark files (a tidy 54-bookmark library and a deliberately messy one).
 
 **Library** — folder tree, inline-editable grid, search expressions (first launch, before a file is opened; the grid fills the same canvas):
 
 ![Library](docs/screenshots/library-empty.png)
 
-**Merge** — duplicate detection and per-conflict resolution before anything is written:
+**Merge** — duplicate detection and per-conflict resolution before anything is written (here: the messy example file merged into the tidy one — 7 duplicates, 7 metadata conflicts, 20 new bookmarks):
 
 ![Merge](docs/screenshots/merge.png)
 
@@ -22,11 +22,15 @@ Real captures from a Windows machine running the v1.0.2 portable build — the T
 
 ![Organize](docs/screenshots/organize.png)
 
-**History** — compressed local snapshots you can inspect and restore:
+**Health** — a fully local scan for duplicates, empty folders, missing titles, tracking parameters and malformed URLs, with snapshot-first fixes (the tidy example library scans clean):
+
+![Health](docs/screenshots/health.png)
+
+**History** — compressed local snapshots you can inspect and restore, pruned to the newest 100 by default (configurable in Settings):
 
 ![History](docs/screenshots/history.png)
 
-**Settings & help** — appearance (theme, accent, density), shortcuts, format notes, and the local categorization dictionary editor:
+**Settings & help** — appearance (theme, accent, density), snapshot retention, the watch folder, shortcuts, format notes, and the local categorization dictionary editor:
 
 ![Settings](docs/screenshots/settings.png)
 
@@ -151,7 +155,7 @@ Settings provides a JSON dictionary editor with validation and an explicit save 
 
 ### Verification status / release gate
 
-Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (73 tests incl. headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. The v1.0.1 portable build passed a full visual review on a real Windows desktop — every workspace exercised against a real 431-bookmark file in portable mode. The v1.0.2 portable build then passed the same visual review for the Tessel interface — every workspace rendered and exercised on the real desktop in portable mode (Settings confirms the portable snapshot directory and the live version string); the screenshots above are from that pass. **Not verified:** the 1.1.0 additions (Health view, headless CLI, drag-and-drop open, watch folder, saved searches, snapshot retention) on a real desktop, the loaded-library grid at scale in the new theme, the light theme and accent presets on a real desktop, the DPI matrix, and the Setup.exe installer path on a real desktop (CI covers its silent install/uninstall). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
+Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (including headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. The v1.0.1 portable build passed a full visual review on a real Windows desktop — every workspace exercised against a real 431-bookmark file in portable mode. The v1.0.2 portable build then passed the same visual review for the Tessel interface — every workspace rendered and exercised on the real desktop in portable mode (Settings confirms the portable snapshot directory and the live version string). The v1.1.0 portable build passed the same review on 2026-11-07 — every workspace rendered on the real desktop in portable mode, and the Merge conflict flow, the Organizer, the Health scan and snapshot retention were exercised against two example bookmark files; the screenshots above are from that pass. That pass also caught a real bug — the Library grid and the bookmark counts kept showing the previous document right after opening a file, and after undo/redo — which is fixed on main under Unreleased, with regression tests. **Not verified:** applying Health fixes in the window against real findings, the watch-folder banner and saved searches in a live session, drag-and-drop open, the headless CLI on Windows, the loaded-library grid at scale in the new theme, the light theme and accent presets on a real desktop, the DPI matrix, and the Setup.exe installer path on a real desktop (CI covers its silent install/uninstall). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
 
 ### Remaining verification constraints
 
