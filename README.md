@@ -4,7 +4,7 @@ An offline-first, native **Rust / egui desktop bookmark studio**, designed for W
 
 ## Screenshots
 
-Real captures from a Windows machine running the v1.0.2 portable build — the Tessel design on a real desktop.
+Real captures from a Windows machine running the v1.0.2 portable build — the Tessel design on a real desktop. (The Health view and the other 1.1.0 additions arrived after these captures.)
 
 **Library** — folder tree, inline-editable grid, search expressions (first launch, before a file is opened; the grid fills the same canvas):
 
@@ -151,7 +151,7 @@ Settings provides a JSON dictionary editor with validation and an explicit save 
 
 ### Verification status / release gate
 
-Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (73 tests incl. headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. The v1.0.1 portable build passed a full visual review on a real Windows desktop — every workspace exercised against a real 431-bookmark file in portable mode. The v1.0.2 portable build then passed the same visual review for the Tessel interface — every workspace rendered and exercised on the real desktop in portable mode (Settings confirms the portable snapshot directory and the live version string); the screenshots above are from that pass. **Not verified:** the loaded-library grid at scale in the new theme, the light theme and accent presets on a real desktop, the DPI matrix, and the Setup.exe installer path on a real desktop (CI covers its silent install/uninstall). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
+Verified (2026-11-07): `cargo fmt --check`, `cargo test --all-targets` (73 tests incl. headless egui panel and shell tests), `cargo clippy --all-targets` (no warnings) and `cargo build --release` pass on Linux and on Windows CI; the MSI silent install/uninstall smoke test passes on Windows CI. The v1.0.1 portable build passed a full visual review on a real Windows desktop — every workspace exercised against a real 431-bookmark file in portable mode. The v1.0.2 portable build then passed the same visual review for the Tessel interface — every workspace rendered and exercised on the real desktop in portable mode (Settings confirms the portable snapshot directory and the live version string); the screenshots above are from that pass. **Not verified:** the 1.1.0 additions (Health view, headless CLI, drag-and-drop open, watch folder, saved searches, snapshot retention) on a real desktop, the loaded-library grid at scale in the new theme, the light theme and accent presets on a real desktop, the DPI matrix, and the Setup.exe installer path on a real desktop (CI covers its silent install/uninstall). See [`docs/verification.md`](docs/verification.md), [`CHANGELOG.md`](CHANGELOG.md) and [`AUDIT.md`](AUDIT.md).
 
 ### Remaining verification constraints
 

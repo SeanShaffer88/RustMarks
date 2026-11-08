@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.0 - 2026-11-07
+
 ### Added (watch folder + saved searches)
 - Watch folder (Settings): watches a chosen folder for new or changed bookmark export files (polled every ~2.5s; the first scan is a silent baseline) and shows a banner offering to stage the file as a merge — never an automatic import, and the currently open file is never flagged.
 - Saved searches: save the Library search under a name from the explorer, reapply in one click, delete with ×; stored in `settings.json`. The status bar and explorer bookmark counts are now cached like the grid rows.
