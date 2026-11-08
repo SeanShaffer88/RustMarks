@@ -449,6 +449,7 @@ impl Studio {
         if self.undo.undo(&mut self.doc) {
             self.doc.source_path = source_path;
             self.checkpoint = self.doc.clone();
+            self.doc_revision += 1;
             self.last_edit = None;
             self.navigating_history = true;
             self.selected.clear();
@@ -460,6 +461,7 @@ impl Studio {
         if self.undo.redo(&mut self.doc) {
             self.doc.source_path = source_path;
             self.checkpoint = self.doc.clone();
+            self.doc_revision += 1;
             self.last_edit = None;
             self.navigating_history = true;
             self.selected.clear();
@@ -504,6 +506,11 @@ impl Studio {
                 self.doc = doc;
                 self.undo = UndoHistory::default();
                 self.checkpoint = self.doc.clone();
+                // Opening replaces the document wholesale and syncs the
+                // checkpoint itself, so the update-loop sync cannot see the
+                // change: bump the revision or the grid/count caches keep
+                // serving the previous document's rows.
+                self.doc_revision += 1;
                 self.last_edit = None;
                 self.cell_focus = None;
                 self.merge_session = None;
@@ -2604,6 +2611,7 @@ impl eframe::App for Studio {
                     None
                 };
             } else {
+                self.doc_revision += 1;
                 self.checkpoint = self.doc.clone();
             }
         }
@@ -2736,6 +2744,45 @@ mod tests {
             .find(|m| m.command == Command::CleanTrackingUrls)
             .unwrap();
         assert_eq!(clean.disabled, Some("Select bookmarks first"));
+    }
+    #[test]
+    fn opening_a_file_refreshes_the_cached_grid_and_counts() {
+        let dir = std::env::temp_dir().join(format!("rustmarks-open-test-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("bookmarks.html");
+        std::fs::write(
+            &path,
+            "<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<DL><p>\n<DT><A HREF=\"https://example.com/one\">One</A>\n<DT><A HREF=\"https://example.com/two\">Two</A>\n</DL><p>\n",
+        )
+        .unwrap();
+        let mut studio = Studio::default();
+        // Prime the caches against the empty starting document, as the
+        // first frames of a real session do.
+        assert_eq!(studio.bookmark_count(), 0);
+        assert!(studio.visible().is_empty());
+        studio.open_path(path);
+        assert_eq!(studio.bookmark_count(), 2);
+        assert_eq!(studio.visible().len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    #[test]
+    fn undo_and_redo_refresh_the_cached_grid_and_counts() {
+        let mut studio = Studio::default();
+        let empty = studio.doc.clone();
+        studio.doc.add(
+            None,
+            BookmarkNode::Bookmark(BookmarkItem::new("One", "https://example.com/one")),
+        );
+        studio.undo.record(empty, false);
+        studio.checkpoint = studio.doc.clone();
+        studio.doc_revision += 1; // what the update-loop sync does for a normal edit
+        assert_eq!(studio.bookmark_count(), 1);
+        studio.undo_edit();
+        assert_eq!(studio.bookmark_count(), 0);
+        assert!(studio.visible().is_empty());
+        studio.redo_edit();
+        assert_eq!(studio.bookmark_count(), 1);
+        assert_eq!(studio.visible().len(), 1);
     }
     struct TempHistory(PathBuf);
     impl TempHistory {
