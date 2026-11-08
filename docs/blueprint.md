@@ -20,9 +20,11 @@
 
 ## 2. Visual Studio Code Theme & UI Design System
 
+> **Superseded:** this section records the original design direction. The shipped design system is Tessel (`src/tessel.rs`); see `docs/tessel-adoption.md`.
+
 To achieve an authentic Visual Studio Code aesthetic in `egui`, the application overrides the default style and visual palette.
 
-### Color Palette (`vscode_theme.rs`):
+### Color Palette (`vscode_theme.rs`, superseded by `tessel.rs`):
 
 ```rust
 pub struct VSCodeTheme {

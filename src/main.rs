@@ -1,8 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod editor;
 mod merge_workspace;
+mod tessel;
 mod ui_components;
-mod vscode_theme;
 fn main() -> eframe::Result<()> {
     let state = rustmarks::window_state::WindowState::load(
         &rustmarks::window_state::WindowState::default_path(),
@@ -18,15 +18,17 @@ fn main() -> eframe::Result<()> {
     if let Some(p) = state.position {
         viewport = viewport.with_position(p);
     }
+    let settings = rustmarks::ui_settings::UiSettings::load();
     eframe::run_native(
         "RustMarks — Bookmark Studio",
         eframe::NativeOptions {
             viewport,
             ..Default::default()
         },
-        Box::new(|cc| {
-            vscode_theme::apply(&cc.egui_ctx);
-            Ok(Box::new(editor::Studio::default()))
+        Box::new(move |cc| {
+            tessel::install_fonts(&cc.egui_ctx);
+            tessel::apply(&cc.egui_ctx, &settings);
+            Ok(Box::new(editor::Studio::with_ui_settings(settings)))
         }),
     )
 }

@@ -11,6 +11,7 @@ pub mod review_state;
 pub mod revision;
 pub mod rules;
 pub mod storage;
+pub mod ui_settings;
 pub mod undo;
 pub mod url_cleanup;
 pub mod window_state;
