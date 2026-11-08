@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added (watch folder + saved searches)
+- Watch folder (Settings): watches a chosen folder for new or changed bookmark export files (polled every ~2.5s; the first scan is a silent baseline) and shows a banner offering to stage the file as a merge — never an automatic import, and the currently open file is never flagged.
+- Saved searches: save the Library search under a name from the explorer, reapply in one click, delete with ×; stored in `settings.json`. The status bar and explorer bookmark counts are now cached like the grid rows.
+
 ### Added (snapshot retention + large-library scale)
 - Snapshot retention: History prunes automatically to the newest 100 snapshots by default; Settings → Snapshots offers 25/50/100/250/All, the History view shows snapshot count and disk use with a Prune now button, and older `settings.json` files pick up the default.
 - Scale: the Library grid caches its filtered rows and folder list (recomputed only when the document, folder or search changes), the row filter moved into the library as a pure function, and an automated test filters a 10,000-bookmark library.
