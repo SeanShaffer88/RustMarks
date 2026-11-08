@@ -1,6 +1,6 @@
 use crate::{
     merge_workspace::{Action as MergeAction, MergeWorkspace},
-    ui_components as components, vscode_theme as theme,
+    tessel as theme, ui_components as components,
 };
 use egui::{Color32, RichText};
 use rustmarks::{
@@ -12,6 +12,7 @@ use rustmarks::{
     models::*,
     parser,
     rules::RuleSet,
+    ui_settings::{AccentPreset, Density, ThemeMode, UiSettings},
     undo::UndoHistory,
 };
 use std::{collections::HashSet, path::PathBuf};
@@ -65,6 +66,11 @@ pub struct Studio {
     source_revision: Option<rustmarks::revision::FileRevision>,
     window_saved: Option<rustmarks::window_state::WindowState>,
     window_pending: Option<(rustmarks::window_state::WindowState, std::time::Instant)>,
+    ui_settings: UiSettings,
+    palette_open: bool,
+    palette_query: String,
+    palette_index: usize,
+    palette_focus: bool,
 }
 impl Default for Studio {
     fn default() -> Self {
@@ -124,10 +130,33 @@ impl Default for Studio {
             source_revision: None,
             window_saved: None,
             window_pending: None,
+            ui_settings: UiSettings::default(),
+            palette_open: false,
+            palette_query: String::new(),
+            palette_index: 0,
+            palette_focus: false,
         }
     }
 }
 impl Studio {
+    /// A studio whose appearance starts from persisted settings (used by
+    /// `main`); `Studio::default()` keeps the Tessel defaults for tests.
+    pub fn with_ui_settings(ui_settings: UiSettings) -> Self {
+        Self {
+            ui_settings,
+            ..Self::default()
+        }
+    }
+
+    /// Apply the current appearance settings to the context and persist
+    /// them. Called when the user changes theme, accent or density.
+    fn appearance_changed(&mut self, ctx: &egui::Context) {
+        theme::apply(ctx, &self.ui_settings);
+        if let Err(error) = self.ui_settings.save() {
+            self.message = format!("Appearance applied but could not be saved: {error}");
+        }
+    }
+
     /// Debounced, atomic persistence of window size/position/maximized state.
     fn persist_window_state(&mut self, ctx: &egui::Context) {
         use rustmarks::window_state::WindowState;
@@ -183,7 +212,7 @@ impl Studio {
         egui::TopBottomPanel::bottom("status")
             .frame(
                 egui::Frame::none()
-                    .fill(theme::DEEP)
+                    .fill(theme::colors().background)
                     .inner_margin(egui::Margin::symmetric(12., 5.)),
             )
             .show(ctx, |ui| {
@@ -208,18 +237,33 @@ impl Studio {
                 });
             });
         egui::TopBottomPanel::bottom("notification").show(ctx, |ui| {
-            ui.label(RichText::new(&self.message).small());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(&self.message).small());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new("Ctrl+K Commands · Ctrl+O Open · Ctrl+S Save · F1 Help")
+                            .small()
+                            .color(theme::colors().muted),
+                    )
+                    .on_hover_text("Keyboard shortcuts. The full list lives in Settings & help.");
+                });
+            });
         });
         egui::SidePanel::left("activity")
             .exact_width(174.)
             .resizable(false)
-            .frame(egui::Frame::none().fill(theme::DEEP).inner_margin(10.0_f32))
+            .frame(
+                egui::Frame::none()
+                    .fill(theme::colors().background)
+                    .inner_margin(10.0_f32),
+            )
             .show(ctx, |ui| {
                 ui.add_space(10.);
                 ui.horizontal(|ui| {
                     let (rect, _) =
                         ui.allocate_exact_size(egui::vec2(27., 27.), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 6.0_f32, theme::ACCENT);
+                    ui.painter()
+                        .rect_filled(rect, 6.0_f32, theme::colors().action);
                     ui.painter().text(
                         rect.center(),
                         egui::Align2::CENTER_CENTER,
@@ -232,7 +276,7 @@ impl Studio {
                         ui.label(
                             RichText::new("BOOKMARK STUDIO")
                                 .size(8.)
-                                .color(theme::MUTED),
+                                .color(theme::colors().muted),
                         );
                     });
                 });
@@ -269,12 +313,12 @@ impl Studio {
                 ui.label(
                     RichText::new("PRIVATE BY DESIGN")
                         .size(9.)
-                        .color(theme::MUTED),
+                        .color(theme::colors().muted),
                 );
                 ui.label(
                     RichText::new("Your bookmarks stay\non this device.")
                         .size(11.)
-                        .color(theme::MUTED),
+                        .color(theme::colors().muted),
                 );
             });
         if self.view == View::Explorer && self.tab != Tab::Diff {
@@ -286,13 +330,13 @@ impl Studio {
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
-                    .fill(theme::EDITOR)
+                    .fill(theme::colors().surface)
                     .inner_margin(24.0_f32),
             )
             .show(ctx, |ui| match self.view {
                 View::Explorer => {
                     self.editor_tabs(ui);
-                    ui.separator();
+                    theme::active_rule(ui);
                     match self.tab {
                         Tab::Grid => self.grid(ui),
                         Tab::Details => self.details(ui),
@@ -439,6 +483,29 @@ impl Studio {
                     self.message = format!("Saved {}", path.display());
                 }
                 Err(e) => self.message = format!("Save failed: {e}"),
+            }
+        }
+    }
+    fn add_bookmark(&mut self) {
+        if self.snapshot("add") {
+            let b = BookmarkItem::new("Untitled bookmark", "https://");
+            self.selected.clear();
+            self.selected.insert(b.id);
+            self.doc.add(self.folder, BookmarkNode::Bookmark(b));
+        }
+    }
+    fn export_chrome_json(&mut self) {
+        if let Some(path) = rfd::FileDialog::new()
+            .add_filter("Chrome JSON", &["json"])
+            .set_file_name("bookmarks-chrome.json")
+            .save_file()
+        {
+            match serde_json::to_vec_pretty(&parser::chrome(&self.doc)) {
+                Ok(data) => match rustmarks::storage::atomic_write(&path, &data) {
+                    Ok(()) => self.message = format!("Exported {}", path.display()),
+                    Err(e) => self.message = e.to_string(),
+                },
+                Err(e) => self.message = e.to_string(),
             }
         }
     }
@@ -613,10 +680,9 @@ impl Studio {
                 ui.label(
                     RichText::new("●  Local workspace")
                         .size(11.)
-                        .color(theme::GREEN),
+                        .color(theme::colors().success),
                 );
-                if ui
-                    .small_button("Save")
+                if components::primary_compact(ui, "Save", true)
                     .on_hover_text("Commit staged changes · Ctrl+S")
                     .clicked()
                 {
@@ -633,7 +699,11 @@ impl Studio {
         });
     }
     fn explorer(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("EXPLORER").small().color(theme::MUTED));
+        ui.label(
+            RichText::new("EXPLORER")
+                .small()
+                .color(theme::colors().muted),
+        );
         ui.separator();
         ui.add(
             egui::TextEdit::singleline(&mut self.query)
@@ -686,7 +756,7 @@ impl Studio {
                     ui.label("Folder name");
                     ui.text_edit_singleline(title).on_hover_text("Folder name");
                 }
-                if ui.button("Delete folder and contents").on_hover_text("Delete this folder and every bookmark in it. A snapshot is taken first; undo with Ctrl+Z.").clicked()
+                if components::danger(ui, "Delete folder and contents", true).on_hover_text("Delete this folder and every bookmark in it. A snapshot is taken first; undo with Ctrl+Z.").clicked()
                     && self.snapshot("delete-folder")
                 {
                     let mut ids = HashSet::new();
@@ -709,23 +779,18 @@ impl Studio {
         ui.label(
             RichText::new("Changes are staged until you save.\nReview them in the Changes tab.")
                 .small()
-                .color(theme::MUTED),
+                .color(theme::colors().muted),
         );
     }
     fn grid(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            if ui
-                .button("+ Bookmark")
+            if components::primary_compact(ui, "+ Bookmark", true)
                 .on_hover_text(
                     "Add a blank bookmark to the current folder. A snapshot is taken first.",
                 )
                 .clicked()
-                && self.snapshot("add")
             {
-                let b = BookmarkItem::new("Untitled bookmark", "https://");
-                self.selected.clear();
-                self.selected.insert(b.id);
-                self.doc.add(self.folder, BookmarkNode::Bookmark(b));
+                self.add_bookmark();
             }
             ui.label(format!("{} selected", self.selected.len()));
             if ui
@@ -735,13 +800,11 @@ impl Studio {
             {
                 self.selected = self.visible().iter().map(|b| b.id).collect();
             }
-            if ui
-                .button("Delete selected")
+            if components::danger(ui, "Delete selected", !self.selected.is_empty())
                 .on_hover_text(
                     "Delete the selected bookmarks. A snapshot is taken first; undo with Ctrl+Z.",
                 )
                 .clicked()
-                && !self.selected.is_empty()
                 && self.snapshot("delete")
             {
                 self.doc.root_folder.remove(&self.selected);
@@ -816,6 +879,10 @@ impl Studio {
         let rows = self.visible();
         let ids: Vec<_> = rows.iter().map(|b| b.id).collect();
         if rows.is_empty() {
+            // Tessel empty state: the 24px grid motif behind a short message
+            // and the primary action — never a blank area.
+            let canvas = ui.available_rect_before_wrap();
+            theme::paint_grid(ui, canvas);
             ui.add_space(60.);
             ui.vertical_centered(|ui| {
                 ui.heading("A little order for your internet.");
@@ -869,15 +936,16 @@ impl Studio {
                 .header(24., |mut header| {
                     for label in ["#", "TITLE", "URL", "TAGS", "NOTES", "CATEGORY"] {
                         header.col(|ui| {
-                            ui.label(RichText::new(label).small().color(theme::MUTED));
+                            ui.label(RichText::new(label).small().color(theme::colors().muted));
                         });
                     }
                 })
                 .body(|body| {
-                    body.rows(28., rows.len(), |mut row| {
+                    body.rows(theme::metrics().row_height, rows.len(), |mut row| {
                         let index = row.index();
                         let mut bookmark = rows[index].clone();
                         let before = bookmark.clone();
+                        row.set_selected(self.selected.contains(&bookmark.id));
                         row.col(|ui| {
                             let selected = self.selected.contains(&bookmark.id);
                             if ui
@@ -917,6 +985,7 @@ impl Studio {
                                 let response = ui.add(
                                     egui::TextEdit::singleline(value)
                                         .id(egui::Id::new(("cell", bookmark.id, col)))
+                                        .font(egui::FontId::proportional(13.))
                                         .desired_width(f32::INFINITY),
                                 )
                                 .on_hover_text("Edit this cell. Enter/Up/Down move rows, Tab moves cells, Ctrl+Z undoes.");
@@ -939,7 +1008,7 @@ impl Studio {
                         }
                         row.col(|ui| {
                             ui.colored_label(
-                                theme::GREEN,
+                                theme::colors().success,
                                 bookmark.category_guess.as_deref().unwrap_or("—"),
                             );
                         });
@@ -998,7 +1067,7 @@ impl Studio {
             ui.text_edit_singleline(&mut bookmark.url)
                 .on_hover_text("Bookmark URL. Stored exactly as typed.");
             if url::Url::parse(&bookmark.url).is_err() {
-                ui.colored_label(theme::RED, "This URL is not valid.");
+                ui.colored_label(theme::colors().danger, "This URL is not valid.");
             }
             ui.label("Notes");
             ui.add(
@@ -1066,7 +1135,7 @@ impl Studio {
                             self.icon_texture = Some((uri.clone(), texture));
                         }
                         Err(e) => {
-                            ui.colored_label(theme::RED, format!("Cannot preview favicon: {e}"));
+                            ui.colored_label(theme::colors().danger, format!("Cannot preview favicon: {e}"));
                         }
                     }
                 }
@@ -1090,7 +1159,7 @@ impl Studio {
             ui.heading("Staged changes");
             ui.checkbox(&mut self.unified, "Unified view")
                 .on_hover_text("Show one combined diff instead of side by side");
-            if ui.button("Commit / Save").on_hover_text("Write the staged changes to disk. A safety snapshot is taken first.").clicked() {
+            if components::primary_compact(ui, "Commit / Save", true).on_hover_text("Write the staged changes to disk. A safety snapshot is taken first.").clicked() {
                 self.save(false);
             }
             if ui.button("Revert all…").on_hover_text("Discard all changes and restore the last committed document. A snapshot is taken first.").clicked() {
@@ -1115,10 +1184,10 @@ impl Studio {
             collapsed: &mut HashSet<Uuid>,
         ) {
             let color = match kinds.get(&node.id()) {
-                Some(diff_view::Kind::Added) => theme::GREEN,
-                Some(diff_view::Kind::Removed) => theme::RED,
-                Some(_) => theme::ORANGE,
-                None => theme::MUTED,
+                Some(diff_view::Kind::Added) => theme::colors().success,
+                Some(diff_view::Kind::Removed) => theme::colors().danger,
+                Some(_) => theme::colors().warning,
+                None => theme::colors().muted,
             };
             match node {
                 BookmarkNode::Folder {
@@ -1179,18 +1248,18 @@ impl Studio {
             }
             for change in changes {
                 let color = match change.kind {
-                    diff_view::Kind::Added => theme::GREEN,
-                    diff_view::Kind::Removed => theme::RED,
-                    _ => theme::ORANGE,
+                    diff_view::Kind::Added => theme::colors().success,
+                    diff_view::Kind::Removed => theme::colors().danger,
+                    _ => theme::colors().warning,
                 };
                 if self.unified {
                     ui.separator();
                     ui.colored_label(color, format!("{:?}  {}", change.kind, change.title));
                     if !change.before.is_empty() {
-                        ui.colored_label(theme::RED, format!("− {}", change.before));
+                        ui.colored_label(theme::colors().danger, format!("− {}", change.before));
                     }
                     if !change.after.is_empty() {
-                        ui.colored_label(theme::GREEN, format!("+ {}", change.after));
+                        ui.colored_label(theme::colors().success, format!("+ {}", change.after));
                     }
                 } else {
                     egui::CollapsingHeader::new(
@@ -1199,8 +1268,10 @@ impl Studio {
                     .id_source(("change", change.id))
                     .show(ui, |ui| {
                         ui.columns(2, |cols| {
-                            cols[0].label(RichText::new(change.before).color(theme::RED));
-                            cols[1].label(RichText::new(change.after).color(theme::GREEN));
+                            cols[0]
+                                .label(RichText::new(change.before).color(theme::colors().danger));
+                            cols[1]
+                                .label(RichText::new(change.after).color(theme::colors().success));
                         });
                     });
                 }
@@ -1209,10 +1280,11 @@ impl Studio {
     }
     fn organizer(&mut self, ui: &mut egui::Ui) {
         ui.heading("Smart Organizer");
+        theme::active_rule(ui);
         ui.label("Local domain and keyword rules. No cloud services, no tracking.");
         ui.add_space(12.);
         ui.horizontal(|ui| {
-            if ui.button("Scan suggestions").on_hover_text("Scan bookmarks with the local rules and propose folders. Does not move anything.").clicked() && self.snapshot("suggest") {
+            if components::primary_compact(ui, "Scan suggestions", true).on_hover_text("Scan bookmarks with the local rules and propose folders. Does not move anything.").clicked() && self.snapshot("suggest") {
                 heuristics::suggest_with(&mut self.doc, &self.rules);
                 self.message = "Suggestions ready. Review below before organizing.".into();
             }
@@ -1231,7 +1303,7 @@ impl Studio {
             {
                 ui.horizontal(|ui| {
                     ui.label(&b.title);
-                    ui.colored_label(theme::GREEN, b.category_guess.as_deref().unwrap_or(""));
+                    ui.colored_label(theme::colors().success, b.category_guess.as_deref().unwrap_or(""));
                     if ui.button("Accept").on_hover_text("Move this bookmark into the suggested folder. A snapshot is taken first.").clicked() && self.snapshot("categorize") {
                         // Move this bookmark only; retain its identity for the staged diff.
                         let category = b.category_guess.clone().unwrap();
@@ -1282,6 +1354,7 @@ impl Studio {
     }
     fn history_panel(&mut self, ui: &mut egui::Ui) {
         ui.heading("Version History");
+        theme::active_rule(ui);
         ui.label("Compressed local snapshots. Restoring stages a working copy; it does not overwrite your file.");
         ui.horizontal(|ui| {
             if ui
@@ -1294,8 +1367,7 @@ impl Studio {
                     Err(e) => self.message = e.to_string(),
                 }
             }
-            if ui
-                .button("Create snapshot")
+            if components::primary_compact(ui, "Create snapshot", true)
                 .on_hover_text("Save a compressed snapshot of the working copy to local history.")
                 .clicked()
                 && self.snapshot("manual")
@@ -1373,11 +1445,72 @@ impl Studio {
     }
     fn settings(&mut self, ui: &mut egui::Ui) {
         ui.heading("Settings & help");
+        theme::active_rule(ui);
         ui.label(format!(
-            "RustMarks {} · Charcoal · Offline-first",
+            "RustMarks {} · Tessel design · Offline-first",
             env!("CARGO_PKG_VERSION")
         ));
         ui.separator();
+        components::section(ui, "Appearance");
+        ui.label(
+            RichText::new("Tessel design system. Theme follows the OS unless you fix it here; the accent preset recolors the action, selection and focus together.")
+                .small()
+                .color(theme::colors().muted),
+        );
+        let before = self.ui_settings;
+        ui.horizontal(|ui| {
+            ui.label("Theme");
+            ui.selectable_value(&mut self.ui_settings.theme, ThemeMode::System, "System")
+                .on_hover_text("Follow the operating system's light/dark setting");
+            ui.selectable_value(&mut self.ui_settings.theme, ThemeMode::Dark, "Dark")
+                .on_hover_text("Always use the Tessel dark theme");
+            ui.selectable_value(&mut self.ui_settings.theme, ThemeMode::Light, "Light")
+                .on_hover_text("Always use the Tessel light theme");
+        });
+        ui.horizontal(|ui| {
+            ui.label("Accent");
+            ui.selectable_value(
+                &mut self.ui_settings.accent,
+                AccentPreset::Crimson,
+                "Crimson",
+            )
+            .on_hover_text("Tessel's brand crimson");
+            ui.selectable_value(&mut self.ui_settings.accent, AccentPreset::Blue, "Blue")
+                .on_hover_text("Blue preset");
+            ui.selectable_value(&mut self.ui_settings.accent, AccentPreset::Teal, "Teal")
+                .on_hover_text("Teal preset");
+            ui.selectable_value(
+                &mut self.ui_settings.accent,
+                AccentPreset::Graphite,
+                "Graphite",
+            )
+            .on_hover_text("Neutral graphite, for color-critical work");
+        });
+        ui.horizontal(|ui| {
+            ui.label("Density");
+            ui.selectable_value(
+                &mut self.ui_settings.density,
+                Density::PerComponent,
+                "Per component",
+            )
+            .on_hover_text("Compact rows and toolbars; comfortable navigation, forms and dialogs");
+            ui.selectable_value(&mut self.ui_settings.density, Density::Compact, "Compact")
+                .on_hover_text("Compact density everywhere");
+            ui.selectable_value(
+                &mut self.ui_settings.density,
+                Density::Comfortable,
+                "Comfortable",
+            )
+            .on_hover_text("Comfortable density everywhere");
+            ui.selectable_value(&mut self.ui_settings.density, Density::Touch, "Touch")
+                .on_hover_text("Large touch targets everywhere");
+        });
+        if self.ui_settings != before {
+            let ctx = ui.ctx().clone();
+            self.appearance_changed(&ctx);
+        }
+        ui.separator();
+        ui.label("Ctrl+K  Command palette    Ctrl+,  Settings    F1  Help");
         ui.label("Ctrl+O  Open    Ctrl+S  Save    Ctrl+Shift+S  Save as");
         ui.label("Ctrl-click rows to toggle selection. Shift-click to select a range.");
         ui.label("Search supports plain terms, tag:dev, and negative terms such as -broken.");
@@ -1389,19 +1522,7 @@ impl Studio {
         ));
         ui.separator();
         if ui.button("Export Chrome / Edge JSON…").on_hover_text("Export a browser-compatible JSON file. RustMarks-only metadata (notes, tags) is omitted.").clicked() {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("Chrome JSON", &["json"])
-                .set_file_name("bookmarks-chrome.json")
-                .save_file()
-            {
-                match serde_json::to_vec_pretty(&parser::chrome(&self.doc)) {
-                    Ok(data) => match rustmarks::storage::atomic_write(&path, &data) {
-                        Ok(()) => self.message = format!("Exported {}", path.display()),
-                        Err(e) => self.message = e.to_string(),
-                    },
-                    Err(e) => self.message = e.to_string(),
-                }
-            }
+            self.export_chrome_json();
         }
         ui.separator();
         ui.heading("Local categorization dictionary");
@@ -1416,7 +1537,7 @@ impl Studio {
             "Categorization rules as JSON. Validate and save to apply; bookmarks are not moved.",
         );
         ui.horizontal(|ui| {
-            if ui.button("Validate and save rules").on_hover_text("Check the rules JSON and, if valid, save it as the active dictionary. Bookmarks are not moved.").clicked() {
+            if components::primary_compact(ui, "Validate and save rules", true).on_hover_text("Check the rules JSON and, if valid, save it as the active dictionary. Bookmarks are not moved.").clicked() {
                 match RuleSet::parse(&self.rules_text) {
                     Ok(rules) => {
                         let path = self
@@ -1452,36 +1573,423 @@ impl Studio {
         ui.label("For lossless editing, use RustMarks JSON as your working file and export HTML for your browser.");
     }
 }
+/// Every action the command palette (Ctrl+K) can run. The palette
+/// complements the visible controls; it never replaces them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Command {
+    Open,
+    Save,
+    SaveAs,
+    MergeFiles,
+    AddBookmark,
+    ScanSuggestions,
+    CleanTrackingUrls,
+    CreateSnapshot,
+    ExportChromeJson,
+    Undo,
+    Redo,
+    GoLibrary,
+    GoMerge,
+    GoCompare,
+    GoOrganize,
+    GoHistory,
+    GoSettings,
+}
+
+struct CommandInfo {
+    command: Command,
+    label: &'static str,
+    keywords: &'static str,
+    shortcut: Option<&'static str>,
+    disabled: Option<&'static str>,
+}
+
+/// Subsequence fuzzy match: every query character must appear in order.
+/// Word starts and contiguous runs score higher. `None` means no match.
+fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
+    if query.is_empty() {
+        return Some(0);
+    }
+    let query: Vec<char> = query.to_lowercase().chars().collect();
+    let text: Vec<char> = text.to_lowercase().chars().collect();
+    let mut score = 0_i32;
+    let mut qi = 0;
+    let mut previous_matched = false;
+    for (index, ch) in text.iter().enumerate() {
+        if qi < query.len() && *ch == query[qi] {
+            score += 1;
+            if index == 0 || !text[index - 1].is_alphanumeric() {
+                score += 4;
+            }
+            if previous_matched {
+                score += 6;
+            }
+            previous_matched = true;
+            qi += 1;
+        } else {
+            previous_matched = false;
+        }
+    }
+    (qi == query.len()).then_some(score)
+}
+
+impl Studio {
+    fn command_catalog(&self) -> Vec<CommandInfo> {
+        let entry = |command, label, keywords, shortcut, disabled| CommandInfo {
+            command,
+            label,
+            keywords,
+            shortcut,
+            disabled,
+        };
+        vec![
+            entry(
+                Command::Open,
+                "Open bookmarks…",
+                "file load import html json",
+                Some("Ctrl+O"),
+                None,
+            ),
+            entry(
+                Command::Save,
+                "Save",
+                "write commit disk",
+                Some("Ctrl+S"),
+                None,
+            ),
+            entry(
+                Command::SaveAs,
+                "Save as…",
+                "write new file export",
+                Some("Ctrl+Shift+S"),
+                None,
+            ),
+            entry(
+                Command::MergeFiles,
+                "Merge files…",
+                "combine import duplicates",
+                None,
+                None,
+            ),
+            entry(
+                Command::AddBookmark,
+                "Add bookmark",
+                "new create entry",
+                None,
+                None,
+            ),
+            entry(
+                Command::ScanSuggestions,
+                "Scan categorization suggestions",
+                "organize rules propose folders",
+                None,
+                None,
+            ),
+            entry(
+                Command::CleanTrackingUrls,
+                "Clean tracking URLs of selected",
+                "utm fbclid gclid remove parameters",
+                None,
+                self.selected.is_empty().then_some("Select bookmarks first"),
+            ),
+            entry(
+                Command::CreateSnapshot,
+                "Create snapshot",
+                "history backup version",
+                None,
+                None,
+            ),
+            entry(
+                Command::ExportChromeJson,
+                "Export Chrome / Edge JSON…",
+                "browser export",
+                None,
+                None,
+            ),
+            entry(
+                Command::Undo,
+                "Undo document edit",
+                "revert",
+                Some("Ctrl+Z"),
+                (!self.undo.can_undo()).then_some("Nothing to undo"),
+            ),
+            entry(
+                Command::Redo,
+                "Redo document edit",
+                "reapply",
+                Some("Ctrl+Y"),
+                (!self.undo.can_redo()).then_some("Nothing to redo"),
+            ),
+            entry(
+                Command::GoLibrary,
+                "Go to Library",
+                "view grid bookmarks",
+                Some("Ctrl+1"),
+                None,
+            ),
+            entry(
+                Command::GoMerge,
+                "Go to Merge",
+                "view combine",
+                Some("Ctrl+2"),
+                None,
+            ),
+            entry(
+                Command::GoCompare,
+                "Go to Compare",
+                "view changes diff staged",
+                Some("Ctrl+3"),
+                None,
+            ),
+            entry(
+                Command::GoOrganize,
+                "Go to Organize",
+                "view suggestions folders",
+                Some("Ctrl+4"),
+                None,
+            ),
+            entry(
+                Command::GoHistory,
+                "Go to History",
+                "view snapshots versions",
+                Some("Ctrl+5"),
+                None,
+            ),
+            entry(
+                Command::GoSettings,
+                "Go to Settings & help",
+                "view appearance rules shortcuts",
+                Some("Ctrl+6"),
+                None,
+            ),
+        ]
+    }
+
+    fn palette_matches(&self) -> Vec<CommandInfo> {
+        let query = self.palette_query.trim().to_lowercase();
+        let mut scored: Vec<(i32, usize, CommandInfo)> = self
+            .command_catalog()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, info)| {
+                let label_score = fuzzy_score(&query, info.label);
+                let keyword_score = fuzzy_score(&query, info.keywords).map(|s| s - 2);
+                label_score
+                    .max(keyword_score)
+                    .map(|score| (score, index, info))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        scored.into_iter().map(|(_, _, info)| info).collect()
+    }
+
+    fn run_command(&mut self, command: Command) {
+        match command {
+            Command::Open => self.request_open(),
+            Command::Save => self.save(false),
+            Command::SaveAs => self.save(true),
+            Command::MergeFiles => self.begin_merge(),
+            Command::AddBookmark => {
+                self.navigate(View::Explorer, Tab::Grid);
+                self.add_bookmark();
+            }
+            Command::ScanSuggestions => {
+                if self.snapshot("suggest") {
+                    heuristics::suggest_with(&mut self.doc, &self.rules);
+                    self.view = View::Organizer;
+                    self.message = "Suggestions ready. Review before organizing.".into();
+                }
+            }
+            Command::CleanTrackingUrls => {
+                if !self.selected.is_empty() && self.snapshot("clean-urls") {
+                    let selected = self.selected.clone();
+                    self.doc.root_folder.visit_mut(&mut |b| {
+                        if selected.contains(&b.id) {
+                            b.url = rustmarks::url_cleanup::clean(&b.url);
+                        }
+                    });
+                }
+            }
+            Command::CreateSnapshot => {
+                if self.snapshot("manual") {
+                    self.snapshots = self.history.list().unwrap_or_default();
+                    self.message = "Snapshot saved to local history.".into();
+                }
+            }
+            Command::ExportChromeJson => self.export_chrome_json(),
+            Command::Undo => self.undo_edit(),
+            Command::Redo => self.redo_edit(),
+            Command::GoLibrary => self.navigate(View::Explorer, Tab::Grid),
+            Command::GoMerge => self.navigate(View::Merge, Tab::Grid),
+            Command::GoCompare => self.navigate(View::Explorer, Tab::Diff),
+            Command::GoOrganize => self.navigate(View::Organizer, Tab::Grid),
+            Command::GoHistory => self.navigate(View::History, Tab::Grid),
+            Command::GoSettings => self.navigate(View::Settings, Tab::Grid),
+        }
+    }
+
+    /// Ctrl+K overlay: fuzzy search over every command, arrow keys move,
+    /// Enter runs, Esc closes. Disabled commands explain why.
+    fn command_palette(&mut self, ctx: &egui::Context) {
+        let matches = self.palette_matches();
+        if self.palette_index >= matches.len() {
+            self.palette_index = matches.len().saturating_sub(1);
+        }
+        let mut run: Option<Command> = None;
+        let mut close = false;
+        ctx.input_mut(|input| {
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                self.palette_index = (self.palette_index + 1).min(matches.len().saturating_sub(1));
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                self.palette_index = self.palette_index.saturating_sub(1);
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::Enter) {
+                if let Some(info) = matches.get(self.palette_index) {
+                    if info.disabled.is_none() {
+                        run = Some(info.command);
+                    }
+                }
+            }
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::Escape) {
+                close = true;
+            }
+        });
+        egui::Window::new("Command palette")
+            .title_bar(false)
+            .collapsible(false)
+            .resizable(false)
+            .fixed_size(egui::vec2(540., 0.))
+            .anchor(egui::Align2::CENTER_TOP, [0., 90.])
+            .show(ctx, |ui| {
+                let search = ui.add(
+                    egui::TextEdit::singleline(&mut self.palette_query)
+                        .hint_text("Type a command…")
+                        .desired_width(f32::INFINITY),
+                );
+                if self.palette_focus {
+                    search.request_focus();
+                    self.palette_focus = false;
+                }
+                if search.changed() {
+                    self.palette_index = 0;
+                }
+                ui.separator();
+                if matches.is_empty() {
+                    ui.label(RichText::new("No commands match.").color(theme::colors().muted));
+                }
+                egui::ScrollArea::vertical()
+                    .max_height(8. * 30.)
+                    .show(ui, |ui| {
+                        for (index, info) in matches.iter().enumerate() {
+                            let selected = index == self.palette_index;
+                            ui.horizontal(|ui| {
+                                if let Some(reason) = info.disabled {
+                                    ui.add_enabled(
+                                        false,
+                                        egui::SelectableLabel::new(false, info.label),
+                                    )
+                                    .on_disabled_hover_text(reason);
+                                    ui.label(
+                                        RichText::new(reason).small().color(theme::colors().muted),
+                                    );
+                                } else if ui
+                                    .selectable_label(selected, info.label)
+                                    .on_hover_text("Run this command")
+                                    .clicked()
+                                {
+                                    run = Some(info.command);
+                                }
+                                if let Some(shortcut) = info.shortcut {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            ui.label(
+                                                RichText::new(shortcut)
+                                                    .small()
+                                                    .color(theme::colors().muted),
+                                            );
+                                        },
+                                    );
+                                }
+                            });
+                        }
+                    });
+            });
+        if let Some(command) = run {
+            self.run_command(command);
+            close = true;
+        }
+        if close {
+            self.palette_open = false;
+            self.palette_query.clear();
+            self.palette_index = 0;
+        }
+    }
+}
+
 impl eframe::App for Studio {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.navigating_history = false;
         self.persist_window_state(ctx);
-        if !ctx.wants_keyboard_input() {
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
-                self.undo_edit();
+        if self.ui_settings.theme == ThemeMode::System {
+            // Follow live OS light/dark changes while running.
+            theme::apply(ctx, &self.ui_settings);
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::K)) {
+            self.palette_open = !self.palette_open;
+            if self.palette_open {
+                self.palette_query.clear();
+                self.palette_index = 0;
+                self.palette_focus = true;
             }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
-                self.redo_edit();
+        }
+        if !self.palette_open {
+            if !ctx.wants_keyboard_input() {
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
+                    self.undo_edit();
+                }
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y)) {
+                    self.redo_edit();
+                }
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::O)) {
+                if self.dirty() {
+                    self.pending_open = true;
+                    self.confirm_discard = true;
+                } else {
+                    self.open();
+                }
+            }
+            if ctx.input_mut(|i| {
+                i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::S)
+            }) {
+                self.save(true);
+            } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
+                self.save(false);
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Comma)) {
+                self.navigate(View::Settings, Tab::Grid);
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F1)) {
+                self.navigate(View::Settings, Tab::Grid);
+            }
+            for (key, view, tab) in [
+                (egui::Key::Num1, View::Explorer, Tab::Grid),
+                (egui::Key::Num2, View::Merge, Tab::Grid),
+                (egui::Key::Num3, View::Explorer, Tab::Diff),
+                (egui::Key::Num4, View::Organizer, Tab::Grid),
+                (egui::Key::Num5, View::History, Tab::Grid),
+                (egui::Key::Num6, View::Settings, Tab::Grid),
+            ] {
+                if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, key)) {
+                    self.navigate(view, tab);
+                }
             }
         }
         if ctx.input(|i| i.viewport().close_requested()) && self.dirty() {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm_close = true;
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::O)) {
-            if self.dirty() {
-                self.pending_open = true;
-                self.confirm_discard = true;
-            } else {
-                self.open();
-            }
-        }
-        if ctx.input_mut(|i| {
-            i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::S)
-        }) {
-            self.save(true);
-        } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
-            self.save(false);
         }
         self.workspace(ctx);
         if self.confirm_discard {
@@ -1494,8 +2002,7 @@ impl eframe::App for Studio {
                         "Your unsaved edits will be discarded. A safety snapshot is created first.",
                     );
                     ui.horizontal(|ui| {
-                        if ui
-                            .button("Discard changes")
+                        if components::danger(ui, "Discard changes", true)
                             .on_hover_text(
                                 "Throw away unsaved changes. A safety snapshot is taken first.",
                             )
@@ -1527,8 +2034,7 @@ impl eframe::App for Studio {
                 .show(ctx, |ui| {
                     ui.label("Save your changes before closing RustMarks?");
                     ui.horizontal(|ui| {
-                        if ui
-                            .button("Save")
+                        if components::primary_compact(ui, "Save", true)
                             .on_hover_text("Save the document, then continue.")
                             .clicked()
                         {
@@ -1559,6 +2065,9 @@ impl eframe::App for Studio {
                         }
                     });
                 });
+        }
+        if self.palette_open {
+            self.command_palette(ctx);
         }
         if self.doc != self.checkpoint {
             if !self.navigating_history {
@@ -1638,7 +2147,7 @@ mod tests {
     fn clean_and_modified_tab_bars_render_and_accept_pointer_selection() {
         for modified in [false, true] {
             let context = egui::Context::default();
-            crate::vscode_theme::apply(&context);
+            crate::tessel::apply(&context, &rustmarks::ui_settings::UiSettings::default());
             let mut studio = Studio::default();
             if modified {
                 studio.doc.add(
@@ -1679,6 +2188,37 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn fuzzy_matching_and_palette_filtering() {
+        assert!(fuzzy_score("sv", "Save").is_some());
+        assert!(fuzzy_score("xyz", "Save").is_none());
+        assert!(fuzzy_score("", "anything").is_some());
+        // Word-start matches outrank scattered ones.
+        assert!(
+            fuzzy_score("sa", "Save as…").unwrap()
+                > fuzzy_score("sa", "Organize scans").unwrap_or(0)
+        );
+        let mut studio = Studio {
+            palette_query: "snap".into(),
+            ..Studio::default()
+        };
+        let matches = studio.palette_matches();
+        assert_eq!(
+            matches.first().map(|m| m.command),
+            Some(Command::CreateSnapshot)
+        );
+        studio.palette_query = "settings".into();
+        let matches = studio.palette_matches();
+        assert!(matches.iter().any(|m| m.command == Command::GoSettings));
+        // Disabled commands carry their reason into the palette.
+        studio.palette_query = "clean".into();
+        let matches = studio.palette_matches();
+        let clean = matches
+            .iter()
+            .find(|m| m.command == Command::CleanTrackingUrls)
+            .unwrap();
+        assert_eq!(clean.disabled, Some("Select bookmarks first"));
+    }
     struct TempHistory(PathBuf);
     impl TempHistory {
         fn new() -> Self {
@@ -1714,7 +2254,7 @@ mod tests {
     #[test]
     fn the_actual_charcoal_shell_renders_all_views_at_both_supported_sizes() {
         let context = egui::Context::default();
-        crate::vscode_theme::apply(&context);
+        crate::tessel::apply(&context, &rustmarks::ui_settings::UiSettings::default());
         let mut studio = merge_fixture();
         let before = studio.doc.clone();
         for size in [egui::vec2(1000., 650.), egui::vec2(1440., 900.)] {
@@ -1837,7 +2377,7 @@ mod tests {
     #[test]
     fn workspace_panels_render_without_a_window_or_gpu() {
         let context = egui::Context::default();
-        crate::vscode_theme::apply(&context);
+        crate::tessel::apply(&context, &rustmarks::ui_settings::UiSettings::default());
         let mut studio = Studio::default();
         let mut first = None;
         for index in 0..1000 {

@@ -55,9 +55,9 @@ Installers are built with `scripts/build-installers.ps1` (WiX 5). CI builds and 
 
 Linux is also supported by eframe/rfd, but requires platform development libraries (on Debian/Ubuntu: `build-essential pkg-config libx11-dev libxi-dev libxcursor-dev libxrandr-dev libxinerama-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libasound2-dev libudev-dev`) and a graphical session. Linux file dialogs use XDG portals.
 
-## Charcoal workspace
+## Tessel design
 
-The GUI uses neutral charcoal surfaces (`#191919` sidebar, `#1f1f1f` canvas, `#272727` cards), light text, subtle borders and blue primary actions. Labeled navigation opens **Library, Merge, Compare, Organize, History and Settings**. Native File / Edit / View / Tools / Help menus retain file actions and shortcuts; the status bar is charcoal instead of bright blue.
+RustMarks follows the [Tessel design system](https://github.com/SeanShaffer88/TesselGUI): token colors on every surface, one crimson primary action per region, selection shown with a crimson marker rather than a flood of color, edges — not fills — building the structure, and a 24px grid motif in empty states. The theme follows the operating system's light/dark setting; Settings & help can fix Dark or Light, switch the accent preset (Crimson, Blue, Teal, Graphite), and set density (Per component, Compact, Comfortable, Touch). Appearance choices persist locally in `settings.json`. Labeled navigation opens **Library, Merge, Compare, Organize, History and Settings**; **Ctrl+K** opens the command palette, **Ctrl+,** opens Settings, and **F1** opens help. The full adoption notes, including the framework deviations, live in [docs/tessel-adoption.md](docs/tessel-adoption.md).
 
 **Merge** follows the supplied reference: two source cards, duplicate-detection metrics, a bounded/virtualized conflict table with per-row dropdowns, preview metrics and **Review Changes**. Counts come from loaded documents, not mock records. File names / URLs truncate with full-value tooltips, and the page scrolls at smaller window sizes.
 
@@ -121,7 +121,7 @@ Window size, position and maximized state are saved to `window.json` in the data
 | `diff_view.rs` | ID-based additions, removals, metadata edits and folder moves |
 | `history.rs` | Compressed, atomically published JSON snapshots |
 | `editor.rs` | Desktop workspace, inline grid, selection and file workflows |
-| `vscode_theme.rs`, `ui_components.rs`, `merge_workspace.rs` | Charcoal styling, shared native components and presentation-only merge UI |
+| `tessel.rs`, `ui_components.rs`, `merge_workspace.rs` | Tessel design tokens/components and presentation-only merge UI |
 | `grid.rs`, `undo.rs` | Testable keyboard cell navigation and bounded session undo/redo |
 | `storage.rs`, `revision.rs`, `favicon.rs` | Atomic file publication, exact-byte source-change checks and bounded local image processing |
 | `url_cleanup.rs` | Conservative tracking cleanup that preserves route/query semantics |

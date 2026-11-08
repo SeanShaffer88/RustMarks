@@ -1,5 +1,5 @@
 //! Presentation only: no dialogs, writes, snapshots, or document mutation.
-use crate::{ui_components as components, vscode_theme as theme};
+use crate::{tessel as theme, ui_components as components};
 use egui::{RichText, Ui};
 use rustmarks::{
     merge::{MergeSession, Resolution},
@@ -93,9 +93,10 @@ impl MergeWorkspace {
             .map(|review| review.stats().incoming)
             .unwrap_or(0);
         egui::ScrollArea::vertical().id_source("merge-page").show(ui,|ui| {
-            ui.label(RichText::new("WORKSPACE / MERGE").size(10.).color(theme::MUTED));
-            ui.label(RichText::new("Merge Bookmark Files").size(23.).strong());
-            ui.label(RichText::new("Bring your collections together. Review every conflict before saving.").size(12.).color(theme::MUTED));
+            ui.label(RichText::new("WORKSPACE / MERGE").size(10.).color(theme::colors().muted));
+            ui.label(RichText::new("Merge Bookmark Files").size(24.).strong());
+            theme::active_rule(ui);
+            ui.label(RichText::new("Bring your collections together. Review every conflict before saving.").size(12.).color(theme::colors().muted));
             ui.add_space(12.);
             ui.columns(2,|columns| {
                 if components::source_card(&mut columns[0],components::SourceCard{label:"Source A · your library",name:&source_a_name,path:source_a_path,count:current_count,action:"Open file…"}) {action=Action::OpenLibrary;}
@@ -105,37 +106,37 @@ impl MergeWorkspace {
             let stats=session.as_ref().map(|review|review.stats());
             let (duplicates,conflicts,added)=stats.map(|stats|(stats.duplicates,stats.conflicts,stats.added)).unwrap_or((0,0,0));
             components::card(ui,|ui|ui.columns(4,|columns| {
-                components::metric(&mut columns[0],duplicates,"Duplicate bookmarks",theme::ACCENT);
-                components::metric(&mut columns[1],duplicates.saturating_sub(conflicts),"Matching metadata",theme::ORANGE);
-                components::metric(&mut columns[2],conflicts,"Metadata conflicts",theme::GREEN);
-                components::metric(&mut columns[3],added,"New bookmarks",theme::RED);
+                components::metric(&mut columns[0],duplicates,"Duplicate bookmarks",theme::colors().info);
+                components::metric(&mut columns[1],duplicates.saturating_sub(conflicts),"Matching metadata",theme::colors().warning);
+                components::metric(&mut columns[2],conflicts,"Metadata conflicts",theme::colors().success);
+                components::metric(&mut columns[3],added,"New bookmarks",theme::colors().danger);
             }));
             components::section(ui,"Resolve Conflicts");
             if let Some(review)=session.as_deref_mut() {self.conflicts(ui,review);} else {
                 components::card(ui,|ui| {
                     ui.add_space(14.);ui.vertical_centered(|ui| {
                         ui.label(RichText::new("Two collections. One organized library.").size(16.).strong());
-                        ui.label(RichText::new("Choose incoming files to find duplicates and compare metadata.").color(theme::MUTED));
-                        if ui.button("Choose source B…").on_hover_text("Pick one or more bookmark files to merge in. Nothing changes until you review.").clicked(){action=Action::ChooseFiles;}
+                        ui.label(RichText::new("Choose incoming files to find duplicates and compare metadata.").color(theme::colors().muted));
+                        if components::primary_compact(ui,"Choose source B…",true).on_hover_text("Pick one or more bookmark files to merge in. Nothing changes until you review.").clicked(){action=Action::ChooseFiles;}
                     });ui.add_space(14.);
                 });
             }
             components::section(ui,"Merge Preview");
             let stats=session.as_ref().map(|review|review.stats());
             components::card(ui,|ui|ui.columns(5,|columns| {
-                components::metric(&mut columns[0],stats.map(|s|s.total).unwrap_or(current_count),"Total bookmarks",theme::ACCENT);
-                components::metric(&mut columns[1],stats.map(|s|s.existing).unwrap_or(current_count),"Already in library",theme::ORANGE);
-                components::metric(&mut columns[2],added,"Will be added",theme::GREEN);
-                components::metric(&mut columns[3],duplicates,"Duplicates skipped",theme::GREEN);
-                components::metric(&mut columns[4],stats.map(|s|s.unresolved).unwrap_or(0),"Choices remaining",theme::ORANGE);
+                components::metric(&mut columns[0],stats.map(|s|s.total).unwrap_or(current_count),"Total bookmarks",theme::colors().progress);
+                components::metric(&mut columns[1],stats.map(|s|s.existing).unwrap_or(current_count),"Already in library",theme::colors().warning);
+                components::metric(&mut columns[2],added,"Will be added",theme::colors().success);
+                components::metric(&mut columns[3],duplicates,"Duplicates skipped",theme::colors().success);
+                components::metric(&mut columns[4],stats.map(|s|s.unresolved).unwrap_or(0),"Choices remaining",theme::colors().warning);
             }));
             ui.add_space(12.);
             if let Some(review)=session.as_ref() {
-                if review.is_stale(library){ui.colored_label(theme::ORANGE,"Your library changed. Refresh the incoming files before applying.");}
-                else if review.stats().unresolved>0 {ui.colored_label(theme::ORANGE,"Choose a resolution for every conflict, or explicitly apply one choice to all.");}
+                if review.is_stale(library){ui.colored_label(theme::colors().warning,"Your library changed. Refresh the incoming files before applying.");}
+                else if review.stats().unresolved>0 {ui.colored_label(theme::colors().warning,"Choose a resolution for every conflict, or explicitly apply one choice to all.");}
             }
             ui.horizontal(|ui| {
-                ui.label(RichText::new("Staged locally. Nothing is written until you save.").size(11.).color(theme::MUTED));
+                ui.label(RichText::new("Staged locally. Nothing is written until you save.").size(11.).color(theme::colors().muted));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center),|ui| {
                     if components::primary(ui,"Review Changes  →",session.as_ref().is_some_and(|review|review.can_apply(library))).clicked(){action=Action::Review;}
                     if ui.add_enabled(session.is_some(),egui::Button::new("Clear")).clicked(){action=Action::Clear;}
@@ -148,8 +149,8 @@ impl MergeWorkspace {
     fn conflicts(&mut self, ui: &mut Ui, review: &mut MergeSession) {
         if review.preview().conflicts.is_empty() {
             components::card(ui, |ui| {
-                ui.colored_label(theme::GREEN, "No metadata conflicts to resolve.");
-                ui.label(RichText::new("Matching duplicates are skipped automatically; folder structure is preserved.").small().color(theme::MUTED));
+                ui.colored_label(theme::colors().success, "No metadata conflicts to resolve.");
+                ui.label(RichText::new("Matching duplicates are skipped automatically; folder structure is preserved.").small().color(theme::colors().muted));
             });
             return;
         }
@@ -233,7 +234,7 @@ impl MergeWorkspace {
                 review.preview().conflicts.len()
             ))
             .small()
-            .color(theme::MUTED),
+            .color(theme::colors().muted),
         );
         components::card(ui, |ui| {
             if visible.is_empty() {
@@ -256,12 +257,12 @@ impl MergeWorkspace {
                         .header(25., |mut header| {
                             for title in ["Title", "Source A", "Source B", "Resolution"] {
                                 header.col(|ui| {
-                                    ui.label(RichText::new(title).small().color(theme::MUTED));
+                                    ui.label(RichText::new(title).small().color(theme::colors().muted));
                                 });
                             }
                         })
                         .body(|body| {
-                            body.rows(38., visible.len(), |mut row| {
+                            body.rows(theme::metrics().control_height + 6., visible.len(), |mut row| {
                                 let index = visible[row.index()];
                                 let conflict = &review.preview().conflicts[index];
                                 row.col(|ui| {
@@ -287,9 +288,9 @@ impl MergeWorkspace {
                                     let original = review.decision(index);
                                     let mut decision = original;
                                     let color = if decision.is_some() {
-                                        theme::GREEN
+                                        theme::colors().success
                                     } else {
-                                        theme::ORANGE
+                                        theme::colors().warning
                                     };
                                     egui::ComboBox::from_id_source(("merge-decision", index))
                                         .width(155.)
@@ -329,14 +330,21 @@ impl MergeWorkspace {
     }
 }
 fn url_cell(ui: &mut Ui, bookmark: &BookmarkItem) {
-    ui.add(egui::Label::new(RichText::new(&bookmark.url).size(11.).color(theme::MUTED)).truncate())
-        .on_hover_text(format!(
-            "{}\n{}\nTags: {}\n{}",
-            bookmark.title,
-            bookmark.url,
-            bookmark.tags.join(", "),
-            bookmark.notes
-        ));
+    ui.add(
+        egui::Label::new(
+            RichText::new(&bookmark.url)
+                .size(11.)
+                .color(theme::colors().muted),
+        )
+        .truncate(),
+    )
+    .on_hover_text(format!(
+        "{}\n{}\nTags: {}\n{}",
+        bookmark.title,
+        bookmark.url,
+        bookmark.tags.join(", "),
+        bookmark.notes
+    ));
 }
 
 #[cfg(test)]
@@ -363,7 +371,7 @@ mod tests {
             MergeSession::new(&library, vec![("incoming.html".into(), incoming)]).unwrap();
         let before = library.clone();
         let context = egui::Context::default();
-        crate::vscode_theme::apply(&context);
+        crate::tessel::apply(&context, &rustmarks::ui_settings::UiSettings::default());
         let mut workspace = MergeWorkspace::default();
         for query in ["First", "nothing matches", ""] {
             workspace.query = query.into();

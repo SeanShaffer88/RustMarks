@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+### Changed (Tessel design system)
+- The whole interface now conforms to the Tessel design system (SeanShaffer88/TesselGUI): token colors replace the blue-accented charcoal theme, with crimson as the single accent — one primary action per region, a crimson selection marker and active-region rule, and the 24px grid motif in empty states.
+- Dark and Light themes follow the operating system, or can be fixed in Settings & help, which also gains accent presets (Crimson, Blue, Teal, Graphite) and density choices (Per component, Compact, Comfortable, Touch). Appearance persists locally in `settings.json`. One dependency added for OS theme detection: `dark-light`.
+- Segoe UI and Cascadia Mono / Consolas load from the Windows Fonts folder at runtime; nothing is bundled.
+
+### Added (command palette)
+- Ctrl+K opens a command palette over every command (fuzzy search, shortcut hints, disabled commands explain why). Ctrl+, opens Settings, F1 opens help, and Ctrl+1…6 jump to the six views. A shortcut hint line now sits in the status bar.
+- Settings & help subtitle now names the design system ("Tessel design") alongside the version.
+
 ### Added (screenshots)
 - README now includes real screenshots (`docs/screenshots/`): Library (loaded and first-launch), Merge, Compare, Organize, History and Settings, captured on a real Windows machine from the v1.0.1 portable build during its field pass.
 
