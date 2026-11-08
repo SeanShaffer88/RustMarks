@@ -70,6 +70,11 @@ pub struct Studio {
     window_pending: Option<(rustmarks::window_state::WindowState, std::time::Instant)>,
     ui_settings: UiSettings,
     health: Option<rustmarks::health::HealthReport>,
+    /// Bumped once per frame in which the document changed (detected by
+    /// the checkpoint sync in update); drives the grid caches below.
+    doc_revision: u64,
+    rows_cache: Option<(u64, Option<Uuid>, String, Vec<BookmarkItem>)>,
+    folders_cache: Option<(u64, Vec<(Uuid, String)>)>,
     palette_open: bool,
     palette_query: String,
     palette_index: usize,
@@ -136,6 +141,9 @@ impl Default for Studio {
             window_pending: None,
             ui_settings: UiSettings::default(),
             health: None,
+            doc_revision: 0,
+            rows_cache: None,
+            folders_cache: None,
             palette_open: false,
             palette_query: String::new(),
             palette_index: 0,
@@ -411,7 +419,14 @@ impl Studio {
     }
     fn snapshot(&mut self, reason: &str) -> bool {
         match self.history.save(&self.doc, reason) {
-            Ok(()) => true,
+            Ok(()) => {
+                // Retention: keep only the newest N snapshots (Settings).
+                let keep = self.ui_settings.snapshot_keep_last;
+                if keep > 0 {
+                    let _ = self.history.prune(keep as usize);
+                }
+                true
+            }
             Err(e) => {
                 self.message = format!("Snapshot failed; operation cancelled: {e}");
                 false
@@ -857,7 +872,7 @@ impl Studio {
             }
         });
         ui.horizontal(|ui| {
-            let folders = self.doc.folders();
+            let folders = self.folder_list();
             let label = folders
                 .iter()
                 .find(|(id, _)| Some(*id) == self.move_target)
@@ -1036,31 +1051,33 @@ impl Studio {
                 });
         });
     }
-    fn visible(&self) -> Vec<BookmarkItem> {
-        fn collect(n: &BookmarkNode, id: Uuid) -> Option<&BookmarkNode> {
-            if n.id() == id {
-                return Some(n);
+    /// The grid's rows, cached: recomputed only when the document, the
+    /// selected folder or the search text changed, so large libraries
+    /// stay responsive while typing or scrolling.
+    fn visible(&mut self) -> Vec<BookmarkItem> {
+        if let Some((revision, folder, query, rows)) = &self.rows_cache {
+            if *revision == self.doc_revision && *folder == self.folder && query == &self.query {
+                return rows.clone();
             }
-            if let BookmarkNode::Folder { children, .. } = n {
-                for c in children {
-                    if let Some(found) = collect(c, id) {
-                        return Some(found);
-                    }
-                }
-            }
-            None
         }
-        let mut items = vec![];
-        let node = self
-            .folder
-            .and_then(|id| collect(&self.doc.root_folder, id))
-            .unwrap_or(&self.doc.root_folder);
-        node.visit(&mut |b| {
-            if heuristics::matches(b, &self.query) {
-                items.push(b.clone());
+        let rows = rustmarks::grid::visible_bookmarks(&self.doc, self.folder, &self.query);
+        self.rows_cache = Some((
+            self.doc_revision,
+            self.folder,
+            self.query.clone(),
+            rows.clone(),
+        ));
+        rows
+    }
+    fn folder_list(&mut self) -> Vec<(Uuid, String)> {
+        if let Some((revision, folders)) = &self.folders_cache {
+            if *revision == self.doc_revision {
+                return folders.clone();
             }
-        });
-        items
+        }
+        let folders = self.doc.folders();
+        self.folders_cache = Some((self.doc_revision, folders.clone()));
+        folders
     }
     fn details(&mut self, ui: &mut egui::Ui) {
         let Some(id) = self.selected.iter().min().copied() else {
@@ -1522,6 +1539,44 @@ impl Studio {
                 self.snapshots = self.history.list().unwrap_or_default();
             }
         });
+        {
+            let keep = self.ui_settings.snapshot_keep_last;
+            let bytes: u64 = self
+                .snapshots
+                .iter()
+                .filter_map(|s| std::fs::metadata(&s.path).ok())
+                .map(|m| m.len())
+                .sum();
+            ui.horizontal(|ui| {
+                ui.label(format!(
+                    "{} snapshot(s) · {:.1} MB on disk · {}",
+                    self.snapshots.len(),
+                    bytes as f64 / 1_048_576.0,
+                    if keep == 0 {
+                        "keeping all (set a limit in Settings)".to_string()
+                    } else {
+                        format!("keeping the newest {keep}")
+                    }
+                ));
+                if keep > 0
+                    && self.snapshots.len() > keep as usize
+                    && ui
+                        .button("Prune now")
+                        .on_hover_text(
+                            "Delete the oldest snapshots beyond the keep limit, right now.",
+                        )
+                        .clicked()
+                {
+                    match self.history.prune(keep as usize) {
+                        Ok(removed) => {
+                            self.message = format!("Removed {removed} old snapshot(s).");
+                            self.snapshots = self.history.list().unwrap_or_default();
+                        }
+                        Err(e) => self.message = e.to_string(),
+                    }
+                }
+            });
+        }
         if self.snapshots.is_empty() {
             ui.label("No snapshots loaded. Refresh to list saved versions.");
         }
@@ -1656,6 +1711,31 @@ impl Studio {
             let ctx = ui.ctx().clone();
             self.appearance_changed(&ctx);
         }
+        components::section(ui, "Snapshots");
+        ui.label(
+            "History snapshots are pruned automatically after each new one: only the newest ones are kept.",
+        );
+        ui.horizontal(|ui| {
+            ui.label("Keep");
+            for (value, label) in [
+                (25_u32, "25"),
+                (50, "50"),
+                (100, "100"),
+                (250, "250"),
+                (0, "All"),
+            ] {
+                if ui
+                    .selectable_value(&mut self.ui_settings.snapshot_keep_last, value, label)
+                    .on_hover_text("How many snapshots to keep; older ones are deleted")
+                    .clicked()
+                {
+                    if let Err(e) = self.ui_settings.save() {
+                        self.message = e.to_string();
+                    }
+                }
+            }
+            ui.label("snapshots");
+        });
         ui.separator();
         ui.label("Ctrl+K  Command palette    Ctrl+,  Settings    F1  Help");
         ui.label("Ctrl+O  Open    Ctrl+S  Save    Ctrl+Shift+S  Save as");
@@ -2265,6 +2345,7 @@ impl eframe::App for Studio {
             self.command_palette(ctx);
         }
         if self.doc != self.checkpoint {
+            self.doc_revision += 1;
             if !self.navigating_history {
                 let now = std::time::Instant::now();
                 let coalesce = ctx.wants_keyboard_input()

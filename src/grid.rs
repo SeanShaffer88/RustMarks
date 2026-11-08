@@ -1,3 +1,40 @@
+use crate::models::{BookmarkDocument, BookmarkItem, BookmarkNode};
+use uuid::Uuid;
+
+/// The bookmarks the Library grid shows: everything under `folder`
+/// (or the whole tree) whose title, URL, tags or notes match `query`.
+/// Pure and allocation-light, so the GUI can cache its result and only
+/// recompute when the document, folder or query actually changes.
+pub fn visible_bookmarks(
+    doc: &BookmarkDocument,
+    folder: Option<Uuid>,
+    query: &str,
+) -> Vec<BookmarkItem> {
+    fn find(node: &BookmarkNode, id: Uuid) -> Option<&BookmarkNode> {
+        if node.id() == id {
+            return Some(node);
+        }
+        if let BookmarkNode::Folder { children, .. } = node {
+            for child in children {
+                if let Some(found) = find(child, id) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+    let node = folder
+        .and_then(|id| find(&doc.root_folder, id))
+        .unwrap_or(&doc.root_folder);
+    let mut items = vec![];
+    node.visit(&mut |b| {
+        if crate::heuristics::matches(b, query) {
+            items.push(b.clone());
+        }
+    });
+    items
+}
+
 /// Stable spreadsheet cell navigation independent of the GUI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
@@ -93,5 +130,43 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Scale guard: filtering a 10,000-bookmark library stays fast and
+    /// correct, so typing in the search box never stalls the window.
+    #[test]
+    fn ten_thousand_bookmarks_filter_quickly() {
+        use crate::models::BookmarkItem;
+        let mut doc = BookmarkDocument::default();
+        let root = doc.root_folder.id();
+        for f in 0..100 {
+            let mut children = Vec::new();
+            for i in 0..100 {
+                children.push(BookmarkNode::Bookmark(BookmarkItem::new(
+                    format!("Site {f}-{i}"),
+                    format!("https://example{f}.com/page-{i}"),
+                )));
+            }
+            doc.add(
+                Some(root),
+                BookmarkNode::Folder {
+                    id: Uuid::new_v4(),
+                    title: format!("Folder {f}"),
+                    children,
+                    date_added: 0,
+                },
+            );
+        }
+        assert_eq!(doc.items().len(), 10_000);
+        let started = std::time::Instant::now();
+        let all = visible_bookmarks(&doc, None, "");
+        let some = visible_bookmarks(&doc, None, "example42");
+        let elapsed = started.elapsed();
+        assert_eq!(all.len(), 10_000);
+        assert_eq!(some.len(), 100);
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "filtering 10k bookmarks took {elapsed:?}"
+        );
     }
 }

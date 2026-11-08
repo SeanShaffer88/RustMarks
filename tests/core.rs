@@ -214,6 +214,31 @@ fn compressed_history_roundtrip_and_disk_save() {
 }
 
 #[test]
+fn history_prune_keeps_the_newest_snapshots() {
+    let directory = std::env::temp_dir().join(format!("rustmarks-test-{}", uuid::Uuid::new_v4()));
+    let h = History {
+        directory: directory.clone(),
+    };
+    let d = document(&[("Test", "https://example.com")]);
+    for _ in 0..5 {
+        h.save(&d, "test").unwrap();
+    }
+    assert_eq!(h.list().unwrap().len(), 5);
+    assert!(h.total_size() > 0);
+    assert_eq!(h.prune(0).unwrap(), 0, "0 keeps everything");
+    assert_eq!(h.prune(2).unwrap(), 3);
+    assert_eq!(h.list().unwrap().len(), 2);
+    assert_eq!(
+        h.prune(10).unwrap(),
+        0,
+        "keeping more than exist removes none"
+    );
+    // The survivors still restore.
+    let snapshots = h.list().unwrap();
+    assert_eq!(h.restore(&snapshots[0]).unwrap(), d);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+#[test]
 fn imports_bom_and_legacy_descriptions() {
     let html="\u{feff}<DL><p><DT><A HREF='https://example.com'>Example</A><DD>A &amp; B <b>description</b>\n<DT><A HREF='https://two.test'>Two</A></DL>";
     let doc = parser::parse(html).unwrap();

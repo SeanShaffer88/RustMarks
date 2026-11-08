@@ -475,6 +475,7 @@ mod tests {
                 theme: ThemeMode::Dark,
                 accent: AccentPreset::Crimson,
                 density: Density::PerComponent,
+                ..Default::default()
             },
         );
         assert_eq!(colors().action, rgb(0xD02946));
@@ -485,6 +486,7 @@ mod tests {
                 theme: ThemeMode::Light,
                 accent: AccentPreset::Crimson,
                 density: Density::PerComponent,
+                ..Default::default()
             },
         );
         assert_eq!(colors().background, rgb(0xEDEDF0));
