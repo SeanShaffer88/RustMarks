@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added (command line + drag-and-drop)
+- Headless CLI: running `rustmarks` with any argument skips the window and runs `check`, `health` (with `--fix` and `--json`), `merge` (`--prefer existing|incoming|combine`), `clean-urls`, `export-chrome` or `snapshot` — the same engines as the GUI, with script-friendly exit codes. `rustmarks help` lists them all.
+- Drag-and-drop: dropping a bookmark file (`.html`, `.htm`, `.json`) onto the window opens it with a hover hint; unsaved changes get the same discard confirmation (with safety snapshot) as Ctrl+O.
+
 ### Added (library health)
 - New **Health** view (Ctrl+5, also in the command palette): a fully local scan reporting duplicate URLs (keyed exactly like the merge engine), empty folders, missing titles, tracking parameters and malformed URLs, with per-issue and per-group automatic fixes — every fix takes a snapshot first and is undoable. Missing titles are derived from the URL; malformed URLs are flagged for manual repair in the grid, never auto-fixed. Nothing is checked over the network. View shortcuts renumbered: Health Ctrl+5, History Ctrl+6, Settings Ctrl+7.
 

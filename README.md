@@ -88,6 +88,10 @@ The grid virtualizes visible rows and keeps stable cell IDs. The bulk **Move sel
 
 Place an empty file named `portable.txt` next to `rustmarks.exe` and all history, dictionaries and window state go to `data/` beside it; nothing is written under `%APPDATA%`. The release portable zip includes the marker. Without it, data lives under `%APPDATA%\RustMarks` (`$XDG_DATA_HOME/RustMarks` on Linux). Existing per-user data is not migrated automatically.
 
+## Command line
+
+Every library operation is also available headless — run `rustmarks` with any argument and no window opens. `rustmarks help` lists the commands: `check` (count bookmarks and folders), `health` (the Health scan, with `--fix` to apply fixes after a snapshot, and `--json` output for scripts; exit code 1 while issues remain), `merge` (base + incoming files, `--prefer existing|incoming|combine` for conflicts, existing wins by default), `clean-urls`, `export-chrome` and `snapshot`. You can also drop a bookmark file (`.html`, `.htm`, `.json`) onto the window to open it, with the same unsaved-changes protection as **Ctrl+O**.
+
 ## Window state
 
 Window size, position and maximized state are saved to `window.json` in the data directory and restored on launch. Positions are only sanity-checked (finite, within +/-32000); there is no per-monitor check, so if a monitor is removed the OS decides where an off-screen window lands. Delete the file to reset.
@@ -117,6 +121,7 @@ Window size, position and maximized state are saved to `window.json` in the data
 | `diff_view.rs` | ID-based additions, removals, metadata edits and folder moves |
 | `history.rs` | Compressed, atomically published JSON snapshots |
 | `health.rs` | Local library health scan (duplicates, empty folders, titles, tracking, malformed URLs) and its automatic fixes |
+| `cli.rs` | Headless command-line mode: check, health, merge, clean-urls, export-chrome, snapshot |
 | `editor.rs` | Desktop workspace, inline grid, selection and file workflows |
 | `tessel.rs`, `ui_components.rs`, `merge_workspace.rs` | Tessel design tokens/components and presentation-only merge UI |
 | `grid.rs`, `undo.rs` | Testable keyboard cell navigation and bounded session undo/redo |

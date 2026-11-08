@@ -50,6 +50,7 @@ pub struct Studio {
     unified: bool,
     confirm_discard: bool,
     pending_open: bool,
+    pending_drop: Option<PathBuf>,
     confirm_close: bool,
     rules: RuleSet,
     rules_text: String,
@@ -116,6 +117,7 @@ impl Default for Studio {
             unified: false,
             confirm_discard: false,
             pending_open: false,
+            pending_drop: None,
             confirm_close: false,
             rules,
             rules_text,
@@ -421,25 +423,28 @@ impl Studio {
             .add_filter("Bookmarks", &["html", "htm", "json"])
             .pick_file()
         {
-            match parser::load_tracked(&path) {
-                Ok(loaded) => {
-                    self.imported_browser_json = loaded.format == parser::SourceFormat::ChromeJson;
-                    self.source_revision = Some(loaded.revision);
-                    let doc = loaded.document;
-                    self.original = doc.clone();
-                    self.doc = doc;
-                    self.undo = UndoHistory::default();
-                    self.checkpoint = self.doc.clone();
-                    self.last_edit = None;
-                    self.cell_focus = None;
-                    self.merge_session = None;
-                    self.merge_ui.reset();
-                    self.folder = None;
-                    self.selected.clear();
-                    self.message = "File opened locally. No data leaves this device.".into();
-                }
-                Err(e) => self.message = format!("Open failed: {e}"),
+            self.open_path(path);
+        }
+    }
+    fn open_path(&mut self, path: PathBuf) {
+        match parser::load_tracked(&path) {
+            Ok(loaded) => {
+                self.imported_browser_json = loaded.format == parser::SourceFormat::ChromeJson;
+                self.source_revision = Some(loaded.revision);
+                let doc = loaded.document;
+                self.original = doc.clone();
+                self.doc = doc;
+                self.undo = UndoHistory::default();
+                self.checkpoint = self.doc.clone();
+                self.last_edit = None;
+                self.cell_focus = None;
+                self.merge_session = None;
+                self.merge_ui.reset();
+                self.folder = None;
+                self.selected.clear();
+                self.message = "File opened locally. No data leaves this device.".into();
             }
+            Err(e) => self.message = format!("Open failed: {e}"),
         }
     }
     fn save(&mut self, save_as: bool) {
@@ -2167,6 +2172,9 @@ impl eframe::App for Studio {
                                 self.pending_open = false;
                                 self.open();
                             }
+                            if let Some(path) = self.pending_drop.take() {
+                                self.open_path(path);
+                            }
                         }
                         if ui
                             .button("Keep editing")
@@ -2175,6 +2183,7 @@ impl eframe::App for Studio {
                         {
                             self.confirm_discard = false;
                             self.pending_open = false;
+                            self.pending_drop = None;
                         }
                     });
                 });
@@ -2215,6 +2224,40 @@ impl eframe::App for Studio {
                         {
                             self.confirm_close = false;
                         }
+                    });
+                });
+        }
+        // Drag-and-drop: dropping a bookmark file on the window opens it,
+        // with the same unsaved-changes protection as Ctrl+O.
+        let dropped: Vec<PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect()
+        });
+        if let Some(path) = dropped.into_iter().find(|p| {
+            matches!(
+                p.extension().and_then(|e| e.to_str()),
+                Some("html" | "htm" | "json")
+            )
+        }) {
+            if self.dirty() {
+                self.pending_drop = Some(path);
+                self.confirm_discard = true;
+            } else {
+                self.open_path(path);
+            }
+        } else if ctx.input(|i| !i.raw.hovered_files.is_empty()) {
+            egui::Area::new(egui::Id::new("drop_hint"))
+                .anchor(egui::Align2::CENTER_CENTER, [0., 0.])
+                .show(ctx, |ui| {
+                    components::card(ui, |ui| {
+                        ui.label(
+                            RichText::new("Drop to open the bookmark file")
+                                .size(16.)
+                                .strong(),
+                        );
                     });
                 });
         }
