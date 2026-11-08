@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added (snapshot retention + large-library scale)
+- Snapshot retention: History prunes automatically to the newest 100 snapshots by default; Settings → Snapshots offers 25/50/100/250/All, the History view shows snapshot count and disk use with a Prune now button, and older `settings.json` files pick up the default.
+- Scale: the Library grid caches its filtered rows and folder list (recomputed only when the document, folder or search changes), the row filter moved into the library as a pure function, and an automated test filters a 10,000-bookmark library.
+
 ### Added (command line + drag-and-drop)
 - Headless CLI: running `rustmarks` with any argument skips the window and runs `check`, `health` (with `--fix` and `--json`), `merge` (`--prefer existing|incoming|combine`), `clean-urls`, `export-chrome` or `snapshot` — the same engines as the GUI, with script-friendly exit codes. `rustmarks help` lists them all.
 - Drag-and-drop: dropping a bookmark file (`.html`, `.htm`, `.json`) onto the window opens it with a hover hint; unsaved changes get the same discard confirmation (with safety snapshot) as Ctrl+O.

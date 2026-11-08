@@ -56,6 +56,33 @@ impl History {
         out.sort_by(|a, b| b.label.cmp(&a.label));
         Ok(out)
     }
+    /// Delete the oldest snapshots beyond `keep_last` (0 = keep all).
+    /// Returns how many were removed. Snapshot names sort newest-first,
+    /// so everything past the first `keep_last` entries goes.
+    pub fn prune(&self, keep_last: usize) -> Result<usize> {
+        if keep_last == 0 {
+            return Ok(0);
+        }
+        let snapshots = self.list()?;
+        let mut removed = 0;
+        for snapshot in snapshots.iter().skip(keep_last) {
+            std::fs::remove_file(&snapshot.path)?;
+            removed += 1;
+        }
+        Ok(removed)
+    }
+    /// Total bytes the stored snapshots occupy.
+    pub fn total_size(&self) -> u64 {
+        self.list()
+            .map(|snapshots| {
+                snapshots
+                    .iter()
+                    .filter_map(|s| std::fs::metadata(&s.path).ok())
+                    .map(|m| m.len())
+                    .sum()
+            })
+            .unwrap_or(0)
+    }
     pub fn restore(&self, snapshot: &Snapshot) -> Result<BookmarkDocument> {
         let decoder = GzDecoder::new(std::fs::File::open(&snapshot.path)?);
         let mut bytes = Vec::new();

@@ -39,12 +39,31 @@ pub enum Density {
     Touch,
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+fn default_snapshot_keep() -> u32 {
+    100
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiSettings {
     pub theme: ThemeMode,
     pub accent: AccentPreset,
     pub density: Density,
+    /// How many history snapshots to keep (0 = keep all). Older snapshots
+    /// are pruned automatically after each new one is taken.
+    #[serde(default = "default_snapshot_keep")]
+    pub snapshot_keep_last: u32,
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            theme: ThemeMode::default(),
+            accent: AccentPreset::default(),
+            density: Density::default(),
+            snapshot_keep_last: default_snapshot_keep(),
+        }
+    }
 }
 
 impl UiSettings {
@@ -99,9 +118,26 @@ mod tests {
             theme: ThemeMode::Light,
             accent: AccentPreset::Teal,
             density: Density::Touch,
+            snapshot_keep_last: 25,
         };
         settings.save_to(&path).unwrap();
         assert_eq!(UiSettings::load_from(&path), settings);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn older_files_without_the_snapshot_limit_default_to_100() {
+        let dir = std::env::temp_dir().join(format!("rustmarks-ui-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("settings.json");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"theme":"Dark","accent":"Crimson","density":"Compact"}"#,
+        )
+        .unwrap();
+        let loaded = UiSettings::load_from(&path);
+        assert_eq!(loaded.snapshot_keep_last, 100);
+        assert_eq!(UiSettings::default().snapshot_keep_last, 100);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
