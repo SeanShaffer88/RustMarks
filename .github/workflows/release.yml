@@ -36,4 +36,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/*.zip dist/*-Setup.exe dist/SHA256SUMS.txt --title "RustMarks ${{ github.ref_name }}" --notes-file CHANGELOG.md
+          $v = "${{ github.ref_name }}".TrimStart("v")
+          $lines = Get-Content CHANGELOG.md
+          $start = -1; $end = $lines.Count
+          for ($i = 0; $i -lt $lines.Count; $i++) {
+            if ($lines[$i] -match "^## $([regex]::Escape($v)) ") { $start = $i; continue }
+            if ($start -ge 0 -and $lines[$i] -match "^## ") { $end = $i; break }
+          }
+          if ($start -ge 0) { $notes = $lines[$start..($end - 1)] -join "`n" } else { $notes = "RustMarks ${{ github.ref_name }}" }
+          Set-Content -Path release-notes.md -Value $notes -Encoding utf8
+          gh release create "${{ github.ref_name }}" dist/*.zip dist/*-Setup.exe dist/SHA256SUMS.txt --title "RustMarks ${{ github.ref_name }}" --notes-file release-notes.md
