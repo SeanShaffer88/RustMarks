@@ -1,6 +1,7 @@
 pub mod diff_view;
 pub mod favicon;
 pub mod grid;
+pub mod health;
 pub mod heuristics;
 pub mod history;
 pub mod merge;

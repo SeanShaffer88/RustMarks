@@ -137,6 +137,7 @@ pub enum Icon {
     Compare,
     Organize,
     History,
+    Health,
     Settings,
 }
 fn draw_icon(ui: &Ui, center: egui::Pos2, icon: Icon, color: Color32) {
@@ -185,6 +186,13 @@ fn draw_icon(ui: &Ui, center: egui::Pos2, icon: Icon, color: Color32) {
             p.circle_stroke(center, 7., s);
             p.line_segment([at(0., -4.), center], s);
             p.line_segment([center, at(4., 2.)], s);
+        }
+        Icon::Health => {
+            p.circle_stroke(center, 7., s);
+            p.line_segment([at(-4., 0.), at(-1., 0.)], s);
+            p.line_segment([at(-1., 0.), at(1., -4.)], s);
+            p.line_segment([at(1., -4.), at(2.5, 3.)], s);
+            p.line_segment([at(2.5, 3.), at(4., 0.)], s);
         }
         Icon::Settings => {
             p.circle_stroke(center, 5., s);
