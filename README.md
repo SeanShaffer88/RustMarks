@@ -4,7 +4,7 @@ An offline-first, native **Rust / egui desktop bookmark studio**, designed for W
 
 ## Screenshots
 
-Real captures from a Windows machine running the v1.0.1 portable build with a real 431-bookmark library loaded.
+Real captures from a Windows machine running the v1.0.1 portable build with a real 431-bookmark library loaded. They predate the Tessel redesign in v1.0.2 — the layout is unchanged; the colors are now crimson on charcoal. Fresh captures are owed.
 
 **Library** — folder tree, inline-editable grid, search expressions:
 
