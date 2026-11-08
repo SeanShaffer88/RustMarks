@@ -4,6 +4,14 @@ mod merge_workspace;
 mod tessel;
 mod ui_components;
 fn main() -> eframe::Result<()> {
+    // Any argument at all selects the headless CLI (see rustmarks::cli);
+    // no arguments opens the window.
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        let (code, output) = rustmarks::cli::run(&args);
+        print!("{output}");
+        std::process::exit(code);
+    }
     let state = rustmarks::window_state::WindowState::load(
         &rustmarks::window_state::WindowState::default_path(),
     );

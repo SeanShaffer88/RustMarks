@@ -1,3 +1,4 @@
+pub mod cli;
 pub mod diff_view;
 pub mod favicon;
 pub mod grid;
