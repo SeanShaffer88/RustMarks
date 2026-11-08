@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Changed (screenshots)
+- README screenshots refreshed with real v1.0.2 captures from the Tessel field pass (all six workspaces, portable mode, real Windows desktop). The v1.0.1 loaded-library capture was retired; the Library shot now shows the Tessel empty state with its grid motif.
+
 ## 1.0.2 - 2026-11-07
 
 ### Changed (Tessel design system)
