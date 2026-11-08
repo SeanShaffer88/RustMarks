@@ -15,7 +15,10 @@ use rustmarks::{
     ui_settings::{AccentPreset, Density, ThemeMode, UiSettings},
     undo::UndoHistory,
 };
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 use uuid::Uuid;
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum View {
@@ -75,6 +78,15 @@ pub struct Studio {
     doc_revision: u64,
     rows_cache: Option<(u64, Option<Uuid>, String, Vec<BookmarkItem>)>,
     folders_cache: Option<(u64, Vec<(Uuid, String)>)>,
+    count_cache: Option<(u64, usize)>,
+    /// Some(name draft) while the user names a search to save.
+    search_name: Option<String>,
+    /// Watch-folder state: file mtimes at the last scan, whether the
+    /// silent baseline scan has run, and a detected new/changed export.
+    watch_seen: std::collections::HashMap<PathBuf, std::time::SystemTime>,
+    watch_baseline: bool,
+    watch_found: Option<PathBuf>,
+    watch_last_check: Option<std::time::Instant>,
     palette_open: bool,
     palette_query: String,
     palette_index: usize,
@@ -144,6 +156,12 @@ impl Default for Studio {
             doc_revision: 0,
             rows_cache: None,
             folders_cache: None,
+            count_cache: None,
+            search_name: None,
+            watch_seen: std::collections::HashMap::new(),
+            watch_baseline: false,
+            watch_found: None,
+            watch_last_check: None,
             palette_open: false,
             palette_query: String::new(),
             palette_index: 0,
@@ -222,6 +240,41 @@ impl Studio {
 
     fn workspace(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("titlebar").show(ctx, |ui| self.toolbar(ui));
+        if let Some(found) = self.watch_found.clone() {
+            egui::TopBottomPanel::top("watch_banner")
+                .frame(
+                    egui::Frame::none()
+                        .fill(theme::colors().raised)
+                        .inner_margin(egui::Margin::symmetric(12., 6.)),
+                )
+                .show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "New bookmark export detected: {}",
+                            found
+                                .file_name()
+                                .map(|n| n.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| found.display().to_string())
+                        ));
+                        if components::primary_compact(ui, "Merge it", true)
+                            .on_hover_text(
+                                "Stage this file as a merge against the open library, ready for review.",
+                            )
+                            .clicked()
+                        {
+                            self.watch_found = None;
+                            self.prepare_merge(vec![found.clone()]);
+                        }
+                        if ui
+                            .button("Dismiss")
+                            .on_hover_text("Ignore this file until it changes again.")
+                            .clicked()
+                        {
+                            self.watch_found = None;
+                        }
+                    });
+                });
+        }
         egui::TopBottomPanel::bottom("status")
             .frame(
                 egui::Frame::none()
@@ -242,7 +295,7 @@ impl Studio {
                         ui.label(
                             RichText::new(format!(
                                 "{} bookmarks  ·  Local rules active  ·  UTF-8",
-                                self.doc.items().len()
+                                self.bookmark_count()
                             ))
                             .color(Color32::WHITE),
                         );
@@ -739,10 +792,91 @@ impl Studio {
                 .desired_width(f32::INFINITY),
         )
         .on_hover_text("Search titles, URLs, tags and notes. Use tag:name and -word to exclude.");
+        // Saved searches: save the current query under a name, reapply or
+        // delete saved ones. Persisted in settings.json.
+        if self.search_name.is_some() {
+            let mut name = self.search_name.clone().unwrap_or_default();
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut name)
+                        .hint_text("Name this search")
+                        .desired_width(120.),
+                );
+                if ui
+                    .button("Save")
+                    .on_hover_text("Save the current search text under this name.")
+                    .clicked()
+                    && !name.trim().is_empty()
+                {
+                    self.ui_settings
+                        .saved_searches
+                        .push(rustmarks::ui_settings::SavedSearch {
+                            name: name.trim().to_owned(),
+                            query: self.query.clone(),
+                        });
+                    if let Err(e) = self.ui_settings.save() {
+                        self.message = e.to_string();
+                    }
+                    self.search_name = None;
+                }
+                if ui
+                    .button("Cancel")
+                    .on_hover_text("Close without saving.")
+                    .clicked()
+                {
+                    self.search_name = None;
+                }
+            });
+            if self.search_name.is_some() {
+                self.search_name = Some(name);
+            }
+        } else if !self.query.trim().is_empty()
+            && ui
+                .button("Save this search…")
+                .on_hover_text("Save the current search so you can reapply it in one click.")
+                .clicked()
+        {
+            self.search_name = Some(String::new());
+        }
+        if !self.ui_settings.saved_searches.is_empty() {
+            let searches = self.ui_settings.saved_searches.clone();
+            let mut apply: Option<String> = None;
+            let mut remove: Option<usize> = None;
+            ui.horizontal_wrapped(|ui| {
+                for (index, saved) in searches.iter().enumerate() {
+                    if ui
+                        .button(&saved.name)
+                        .on_hover_text(format!("Search for: {}", saved.query))
+                        .clicked()
+                    {
+                        apply = Some(saved.query.clone());
+                    }
+                    if ui
+                        .small_button("×")
+                        .on_hover_text(format!(
+                            "Delete the saved search \u{201c}{}\u{201d}",
+                            saved.name
+                        ))
+                        .clicked()
+                    {
+                        remove = Some(index);
+                    }
+                }
+            });
+            if let Some(query) = apply {
+                self.query = query;
+            }
+            if let Some(index) = remove {
+                self.ui_settings.saved_searches.remove(index);
+                if let Err(e) = self.ui_settings.save() {
+                    self.message = e.to_string();
+                }
+            }
+        }
         if ui
             .selectable_label(
                 self.folder.is_none(),
-                format!("All bookmarks  ({})", self.doc.items().len()),
+                format!("All bookmarks  ({})", self.bookmark_count()),
             )
             .on_hover_text("Show bookmarks from every folder")
             .clicked()
@@ -1069,6 +1203,16 @@ impl Studio {
         ));
         rows
     }
+    fn bookmark_count(&mut self) -> usize {
+        if let Some((revision, count)) = self.count_cache {
+            if revision == self.doc_revision {
+                return count;
+            }
+        }
+        let count = self.doc.items().len();
+        self.count_cache = Some((self.doc_revision, count));
+        count
+    }
     fn folder_list(&mut self) -> Vec<(Uuid, String)> {
         if let Some((revision, folders)) = &self.folders_cache {
             if *revision == self.doc_revision {
@@ -1310,6 +1454,44 @@ impl Studio {
     }
     fn rescan_health(&mut self) {
         self.health = Some(rustmarks::health::scan(&self.doc));
+    }
+    /// Poll the watch folder (every ~2.5s while one is set). The first
+    /// scan after launch or a folder change is a silent baseline; later
+    /// scans flag new or changed bookmark files — never the file that is
+    /// currently open.
+    fn poll_watch(&mut self) {
+        let Some(dir) = self.ui_settings.watch_dir.clone() else {
+            return;
+        };
+        let due = self
+            .watch_last_check
+            .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(2500));
+        if !due {
+            return;
+        }
+        self.watch_last_check = Some(std::time::Instant::now());
+        let current = watch_dir_files(Path::new(&dir));
+        if !self.watch_baseline {
+            self.watch_seen = current;
+            self.watch_baseline = true;
+            return;
+        }
+        let open_path = self.doc.source_path.as_ref().map(PathBuf::from);
+        let mut newest: Option<(PathBuf, std::time::SystemTime)> = None;
+        for (path, mtime) in &current {
+            if self.watch_seen.get(path) != Some(mtime)
+                && open_path.as_ref() != Some(path)
+                && newest.as_ref().is_none_or(|(_, t)| *mtime > *t)
+            {
+                newest = Some((path.clone(), *mtime));
+            }
+        }
+        if let Some((path, _)) = newest {
+            if self.watch_found.as_ref() != Some(&path) {
+                self.watch_found = Some(path);
+            }
+        }
+        self.watch_seen = current;
     }
     fn health_view(&mut self, ui: &mut egui::Ui) {
         use rustmarks::health::IssueKind;
@@ -1659,7 +1841,7 @@ impl Studio {
                 .small()
                 .color(theme::colors().muted),
         );
-        let before = self.ui_settings;
+        let before = self.ui_settings.clone();
         ui.horizontal(|ui| {
             ui.label("Theme");
             ui.selectable_value(&mut self.ui_settings.theme, ThemeMode::System, "System")
@@ -1735,6 +1917,45 @@ impl Studio {
                 }
             }
             ui.label("snapshots");
+        });
+        ui.separator();
+        components::section(ui, "Watch folder");
+        ui.label(
+            "Pick a folder your browser exports bookmarks to. When a new or changed export file appears there, RustMarks offers to merge it — nothing is imported without your click.",
+        );
+        ui.horizontal(|ui| {
+            ui.label(
+                self.ui_settings
+                    .watch_dir
+                    .as_deref()
+                    .unwrap_or("Not watching any folder"),
+            );
+            if ui
+                .button("Choose…")
+                .on_hover_text("Choose the folder to watch for new bookmark exports.")
+                .clicked()
+            {
+                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                    self.ui_settings.watch_dir = Some(dir.display().to_string());
+                    self.watch_baseline = false;
+                    self.watch_found = None;
+                    if let Err(e) = self.ui_settings.save() {
+                        self.message = e.to_string();
+                    }
+                }
+            }
+            if self.ui_settings.watch_dir.is_some()
+                && ui
+                    .button("Stop watching")
+                    .on_hover_text("Stop watching the folder. Nothing is deleted.")
+                    .clicked()
+            {
+                self.ui_settings.watch_dir = None;
+                self.watch_found = None;
+                if let Err(e) = self.ui_settings.save() {
+                    self.message = e.to_string();
+                }
+            }
         });
         ui.separator();
         ui.label("Ctrl+K  Command palette    Ctrl+,  Settings    F1  Help");
@@ -1834,6 +2055,26 @@ struct CommandInfo {
 
 /// Subsequence fuzzy match: every query character must appear in order.
 /// Word starts and contiguous runs score higher. `None` means no match.
+/// Bookmark files (`.html`, `.htm`, `.json`) in a folder, with their
+/// modification times — the watch folder's raw scan.
+fn watch_dir_files(dir: &Path) -> std::collections::HashMap<PathBuf, std::time::SystemTime> {
+    let mut out = std::collections::HashMap::new();
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if matches!(
+                path.extension().and_then(|e| e.to_str()),
+                Some("html" | "htm" | "json")
+            ) {
+                if let Ok(mtime) = entry.metadata().and_then(|m| m.modified()) {
+                    out.insert(path, mtime);
+                }
+            }
+        }
+    }
+    out
+}
+
 fn fuzzy_score(query: &str, text: &str) -> Option<i32> {
     if query.is_empty() {
         return Some(0);
@@ -2228,6 +2469,7 @@ impl eframe::App for Studio {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.confirm_close = true;
         }
+        self.poll_watch();
         self.workspace(ctx);
         if self.confirm_discard {
             egui::Window::new("Discard staged changes?")
@@ -2649,6 +2891,19 @@ mod tests {
         let snapshots = studio.history.list().unwrap();
         assert_eq!(snapshots.len(), 1);
         assert_eq!(studio.history.restore(&snapshots[0]).unwrap(), before);
+    }
+    #[test]
+    fn watch_dir_files_lists_only_bookmark_files() {
+        let dir = std::env::temp_dir().join(format!("rustmarks-watch-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("export.html"), "<DL></DL>").unwrap();
+        std::fs::write(dir.join("bookmarks.json"), "{}").unwrap();
+        std::fs::write(dir.join("notes.txt"), "ignore me").unwrap();
+        let files = watch_dir_files(&dir);
+        assert_eq!(files.len(), 2);
+        assert!(files.contains_key(&dir.join("export.html")));
+        assert!(files.contains_key(&dir.join("bookmarks.json")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
     #[test]
     fn workspace_panels_render_without_a_window_or_gpu() {

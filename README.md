@@ -88,6 +88,10 @@ The grid virtualizes visible rows and keeps stable cell IDs. The bulk **Move sel
 
 Place an empty file named `portable.txt` next to `rustmarks.exe` and all history, dictionaries and window state go to `data/` beside it; nothing is written under `%APPDATA%`. The release portable zip includes the marker. Without it, data lives under `%APPDATA%\RustMarks` (`$XDG_DATA_HOME/RustMarks` on Linux). Existing per-user data is not migrated automatically.
 
+## Watch folder & saved searches
+
+Point Settings → Watch folder at the folder your browser exports bookmarks to: when a new or changed export file appears there, a banner offers to stage it as a merge — nothing is ever imported without your click, and the file you have open is never flagged. In the Library explorer, **Save this search…** stores the current search under a name (in `settings.json`); saved searches reapply in one click and can be deleted with their ×.
+
 ## Command line
 
 Every library operation is also available headless — run `rustmarks` with any argument and no window opens. `rustmarks help` lists the commands: `check` (count bookmarks and folders), `health` (the Health scan, with `--fix` to apply fixes after a snapshot, and `--json` output for scripts; exit code 1 while issues remain), `merge` (base + incoming files, `--prefer existing|incoming|combine` for conflicts, existing wins by default), `clean-urls`, `export-chrome` and `snapshot`. You can also drop a bookmark file (`.html`, `.htm`, `.json`) onto the window to open it, with the same unsaved-changes protection as **Ctrl+O**.

@@ -1,6 +1,7 @@
-//! Persisted appearance settings for the Tessel design system: theme mode,
-//! accent preset and density. Stored as readable JSON in the data directory
-//! (`settings.json` beside `rules.json`); no telemetry, no network.
+//! Persisted settings: the Tessel appearance choices (theme mode, accent
+//! preset, density) plus workspace preferences — snapshot retention, the
+//! watch folder and saved searches. Stored as readable JSON in the data
+//! directory (`settings.json` beside `rules.json`); no telemetry, no network.
 use crate::parser::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -43,7 +44,14 @@ fn default_snapshot_keep() -> u32 {
     100
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// A named Library search the user saved (e.g. "Dev docs" → `tag:dev`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavedSearch {
+    pub name: String,
+    pub query: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiSettings {
     pub theme: ThemeMode,
@@ -53,6 +61,12 @@ pub struct UiSettings {
     /// are pruned automatically after each new one is taken.
     #[serde(default = "default_snapshot_keep")]
     pub snapshot_keep_last: u32,
+    /// Folder watched for new browser-export files (None = not watching).
+    #[serde(default)]
+    pub watch_dir: Option<String>,
+    /// The user's saved Library searches.
+    #[serde(default)]
+    pub saved_searches: Vec<SavedSearch>,
 }
 
 impl Default for UiSettings {
@@ -62,6 +76,8 @@ impl Default for UiSettings {
             accent: AccentPreset::default(),
             density: Density::default(),
             snapshot_keep_last: default_snapshot_keep(),
+            watch_dir: None,
+            saved_searches: Vec::new(),
         }
     }
 }
@@ -119,6 +135,11 @@ mod tests {
             accent: AccentPreset::Teal,
             density: Density::Touch,
             snapshot_keep_last: 25,
+            watch_dir: Some("C:/Exports".into()),
+            saved_searches: vec![SavedSearch {
+                name: "Dev".into(),
+                query: "tag:dev".into(),
+            }],
         };
         settings.save_to(&path).unwrap();
         assert_eq!(UiSettings::load_from(&path), settings);
@@ -137,6 +158,8 @@ mod tests {
         .unwrap();
         let loaded = UiSettings::load_from(&path);
         assert_eq!(loaded.snapshot_keep_last, 100);
+        assert_eq!(loaded.watch_dir, None);
+        assert!(loaded.saved_searches.is_empty());
         assert_eq!(UiSettings::default().snapshot_keep_last, 100);
         let _ = std::fs::remove_dir_all(&dir);
     }
