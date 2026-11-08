@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.0.2 - 2026-11-07
+
 ### Changed (Tessel design system)
 - The whole interface now conforms to the Tessel design system (SeanShaffer88/TesselGUI): token colors replace the blue-accented charcoal theme, with crimson as the single accent — one primary action per region, a crimson selection marker and active-region rule, and the 24px grid motif in empty states.
 - Dark and Light themes follow the operating system, or can be fixed in Settings & help, which also gains accent presets (Crimson, Blue, Teal, Graphite) and density choices (Per component, Compact, Comfortable, Touch). Appearance persists locally in `settings.json`. One dependency added for OS theme detection: `dark-light`.
