@@ -23,6 +23,7 @@ enum View {
     Organizer,
     Merge,
     History,
+    Health,
     Settings,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,6 +68,7 @@ pub struct Studio {
     window_saved: Option<rustmarks::window_state::WindowState>,
     window_pending: Option<(rustmarks::window_state::WindowState, std::time::Instant)>,
     ui_settings: UiSettings,
+    health: Option<rustmarks::health::HealthReport>,
     palette_open: bool,
     palette_query: String,
     palette_index: usize,
@@ -131,6 +133,7 @@ impl Default for Studio {
             window_saved: None,
             window_pending: None,
             ui_settings: UiSettings::default(),
+            health: None,
             palette_open: false,
             palette_query: String::new(),
             palette_index: 0,
@@ -287,6 +290,7 @@ impl Studio {
                     (View::Merge, Tab::Grid, Icon::Merge, "Merge"),
                     (View::Explorer, Tab::Diff, Icon::Compare, "Compare"),
                     (View::Organizer, Tab::Grid, Icon::Organize, "Organize"),
+                    (View::Health, Tab::Grid, Icon::Health, "Health"),
                     (View::History, Tab::Grid, Icon::History, "History"),
                     (View::Settings, Tab::Grid, Icon::Settings, "Settings"),
                 ] {
@@ -344,6 +348,9 @@ impl Studio {
                     }
                 }
                 View::Organizer => self.organizer(ui),
+                View::Health => {
+                    egui::ScrollArea::vertical().show(ui, |ui| self.health_view(ui));
+                }
                 View::Merge => self.merge_panel(ui),
                 View::History => self.history_panel(ui),
                 View::Settings => {
@@ -644,6 +651,7 @@ impl Studio {
                     ("Merge", View::Merge, Tab::Grid),
                     ("Compare", View::Explorer, Tab::Diff),
                     ("Organize", View::Organizer, Tab::Grid),
+                    ("Health", View::Health, Tab::Grid),
                     ("History", View::History, Tab::Grid),
                     ("Settings", View::Settings, Tab::Grid),
                 ] {
@@ -1278,6 +1286,140 @@ impl Studio {
             }
         });
     }
+    fn rescan_health(&mut self) {
+        self.health = Some(rustmarks::health::scan(&self.doc));
+    }
+    fn health_view(&mut self, ui: &mut egui::Ui) {
+        use rustmarks::health::IssueKind;
+        ui.heading("Library Health");
+        theme::active_rule(ui);
+        ui.label(
+            "A fully local scan for duplicates, empty folders, missing titles, tracking parameters and malformed URLs. Nothing is checked over the network, and nothing changes until you fix it.",
+        );
+        ui.add_space(8.);
+        if self.health.is_none() {
+            self.rescan_health();
+        }
+        let report = self.health.clone().unwrap_or_default();
+        components::card(ui, |ui| {
+            ui.columns(6, |columns| {
+                components::metric(
+                    &mut columns[0],
+                    report.bookmarks,
+                    "Bookmarks scanned",
+                    theme::colors().progress,
+                );
+                components::metric(
+                    &mut columns[1],
+                    report.count(IssueKind::DuplicateUrl),
+                    "Duplicate URLs",
+                    theme::colors().info,
+                );
+                components::metric(
+                    &mut columns[2],
+                    report.count(IssueKind::EmptyFolder),
+                    "Empty folders",
+                    theme::colors().warning,
+                );
+                components::metric(
+                    &mut columns[3],
+                    report.count(IssueKind::MissingTitle),
+                    "Missing titles",
+                    theme::colors().warning,
+                );
+                components::metric(
+                    &mut columns[4],
+                    report.count(IssueKind::TrackingParameters),
+                    "Tracking parameters",
+                    theme::colors().info,
+                );
+                components::metric(
+                    &mut columns[5],
+                    report.count(IssueKind::MalformedUrl),
+                    "Malformed URLs",
+                    theme::colors().danger,
+                );
+            });
+        });
+        ui.add_space(10.);
+        ui.horizontal(|ui| {
+            if components::primary_compact(ui, "Rescan", true)
+                .on_hover_text("Run the health scan again against the current library.")
+                .clicked()
+            {
+                self.rescan_health();
+            }
+            if report.is_clean() {
+                ui.label(
+                    RichText::new("No issues found — this library is healthy.")
+                        .color(theme::colors().success),
+                );
+            }
+        });
+        for kind in IssueKind::ALL {
+            let issues: Vec<_> = report
+                .issues
+                .iter()
+                .filter(|i| i.kind == kind)
+                .cloned()
+                .collect();
+            if issues.is_empty() {
+                continue;
+            }
+            components::section(ui, kind.label());
+            if issues.iter().any(|i| i.fixable) {
+                let fixable: Vec<_> = issues.iter().filter(|i| i.fixable).cloned().collect();
+                if ui
+                    .button(format!("Fix all {} in this group", fixable.len()))
+                    .on_hover_text(
+                        "Apply the automatic fix to every fixable issue in this group. A snapshot is taken first; undo with Ctrl+Z.",
+                    )
+                    .clicked()
+                    && self.snapshot("health-fix")
+                {
+                    let mut fixed = 0;
+                    for issue in &fixable {
+                        if rustmarks::health::fix(&mut self.doc, issue) {
+                            fixed += 1;
+                        }
+                    }
+                    self.message = format!("Fixed {fixed} issue(s).");
+                    self.rescan_health();
+                    return;
+                }
+            }
+            for issue in &issues {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Label::new(&issue.detail).truncate())
+                        .on_hover_text(&issue.detail);
+                    if issue.fixable {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .small_button("Fix")
+                                .on_hover_text(
+                                    "Apply the automatic fix. A snapshot is taken first; undo with Ctrl+Z.",
+                                )
+                                .clicked()
+                                && self.snapshot("health-fix")
+                                && rustmarks::health::fix(&mut self.doc, issue)
+                            {
+                                self.message = "Fixed.".into();
+                                self.rescan_health();
+                            }
+                        });
+                    } else {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            ui.label(
+                                RichText::new("Fix in the Library grid")
+                                    .small()
+                                    .color(theme::colors().muted),
+                            );
+                        });
+                    }
+                });
+            }
+        }
+    }
     fn organizer(&mut self, ui: &mut egui::Ui) {
         ui.heading("Smart Organizer");
         theme::active_rule(ui);
@@ -1593,6 +1735,7 @@ enum Command {
     GoCompare,
     GoOrganize,
     GoHistory,
+    GoHealth,
     GoSettings,
 }
 
@@ -1749,17 +1892,24 @@ impl Studio {
                 None,
             ),
             entry(
+                Command::GoHealth,
+                "Go to Library Health",
+                "view scan duplicates empty folders tracking malformed",
+                Some("Ctrl+5"),
+                None,
+            ),
+            entry(
                 Command::GoHistory,
                 "Go to History",
                 "view snapshots versions",
-                Some("Ctrl+5"),
+                Some("Ctrl+6"),
                 None,
             ),
             entry(
                 Command::GoSettings,
                 "Go to Settings & help",
                 "view appearance rules shortcuts",
-                Some("Ctrl+6"),
+                Some("Ctrl+7"),
                 None,
             ),
         ]
@@ -1823,6 +1973,7 @@ impl Studio {
             Command::GoMerge => self.navigate(View::Merge, Tab::Grid),
             Command::GoCompare => self.navigate(View::Explorer, Tab::Diff),
             Command::GoOrganize => self.navigate(View::Organizer, Tab::Grid),
+            Command::GoHealth => self.navigate(View::Health, Tab::Grid),
             Command::GoHistory => self.navigate(View::History, Tab::Grid),
             Command::GoSettings => self.navigate(View::Settings, Tab::Grid),
         }
@@ -1979,8 +2130,9 @@ impl eframe::App for Studio {
                 (egui::Key::Num2, View::Merge, Tab::Grid),
                 (egui::Key::Num3, View::Explorer, Tab::Diff),
                 (egui::Key::Num4, View::Organizer, Tab::Grid),
-                (egui::Key::Num5, View::History, Tab::Grid),
-                (egui::Key::Num6, View::Settings, Tab::Grid),
+                (egui::Key::Num5, View::Health, Tab::Grid),
+                (egui::Key::Num6, View::History, Tab::Grid),
+                (egui::Key::Num7, View::Settings, Tab::Grid),
             ] {
                 if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, key)) {
                     self.navigate(view, tab);

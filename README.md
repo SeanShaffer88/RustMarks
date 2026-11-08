@@ -53,7 +53,7 @@ Linux is also supported by eframe/rfd, but requires platform development librari
 
 ## Tessel design
 
-RustMarks follows the [Tessel design system](https://github.com/SeanShaffer88/TesselGUI): token colors on every surface, one crimson primary action per region, selection shown with a crimson marker rather than a flood of color, edges — not fills — building the structure, and a 24px grid motif in empty states. The theme follows the operating system's light/dark setting; Settings & help can fix Dark or Light, switch the accent preset (Crimson, Blue, Teal, Graphite), and set density (Per component, Compact, Comfortable, Touch). Appearance choices persist locally in `settings.json`. Labeled navigation opens **Library, Merge, Compare, Organize, History and Settings**; **Ctrl+K** opens the command palette, **Ctrl+,** opens Settings, and **F1** opens help. The full adoption notes, including the framework deviations, live in [docs/tessel-adoption.md](docs/tessel-adoption.md).
+RustMarks follows the [Tessel design system](https://github.com/SeanShaffer88/TesselGUI): token colors on every surface, one crimson primary action per region, selection shown with a crimson marker rather than a flood of color, edges — not fills — building the structure, and a 24px grid motif in empty states. The theme follows the operating system's light/dark setting; Settings & help can fix Dark or Light, switch the accent preset (Crimson, Blue, Teal, Graphite), and set density (Per component, Compact, Comfortable, Touch). Appearance choices persist locally in `settings.json`. Labeled navigation opens **Library, Merge, Compare, Organize, Health, History and Settings** — Health runs a fully local scan for duplicate URLs, empty folders, missing titles, tracking parameters and malformed URLs, with one-click fixes that snapshot first. **Ctrl+K** opens the command palette, **Ctrl+,** opens Settings, and **F1** opens help. The full adoption notes, including the framework deviations, live in [docs/tessel-adoption.md](docs/tessel-adoption.md).
 
 **Merge** follows the supplied reference: two source cards, duplicate-detection metrics, a bounded/virtualized conflict table with per-row dropdowns, preview metrics and **Review Changes**. Counts come from loaded documents, not mock records. File names / URLs truncate with full-value tooltips, and the page scrolls at smaller window sizes.
 
@@ -116,6 +116,7 @@ Window size, position and maximized state are saved to `window.json` in the data
 | `merge.rs`, `review_state.rs` | URL normalization, validated merge sessions, explicit decisions and stale-review protection |
 | `diff_view.rs` | ID-based additions, removals, metadata edits and folder moves |
 | `history.rs` | Compressed, atomically published JSON snapshots |
+| `health.rs` | Local library health scan (duplicates, empty folders, titles, tracking, malformed URLs) and its automatic fixes |
 | `editor.rs` | Desktop workspace, inline grid, selection and file workflows |
 | `tessel.rs`, `ui_components.rs`, `merge_workspace.rs` | Tessel design tokens/components and presentation-only merge UI |
 | `grid.rs`, `undo.rs` | Testable keyboard cell navigation and bounded session undo/redo |
